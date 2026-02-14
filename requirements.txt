@@ -3,11 +3,13 @@ arxiv==2.4.0
 certifi==2026.1.4
 charset-normalizer==3.4.4
 feedparser==6.0.12
+google-genai==0.3.0
 idna==3.11
 pydantic==2.12.5
 pydantic_core==2.41.5
 requests==2.32.5
 sgmllib3k==1.0.0
+streamlit==1.40.1
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.6.3
