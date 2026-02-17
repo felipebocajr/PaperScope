@@ -31,13 +31,16 @@ DEFAULT_INFERENCE_PROFILE = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 # ============================================================================
 
 def arxiv_result_to_dict(r: arxiv.Result) -> dict:
-    """Convert arxiv.Result to dictionary."""
+    print(f"Debug - entry_id: {r.entry_id}")
+    print(f"Debug - get_short_id: {r.get_short_id()}")
+    print(f"Debug - pdf_url: {r.pdf_url}")
+    
     return {
+        "ID": r.get_short_id,
         "title": r.title,
         "summary": r.summary,
-        "published": r.published.strftime("%Y-%m-%d") if r.published else None,
-        "primary_category": r.primary_category,
-        }
+        "pdf_url": r.pdf_url
+}
 
 
 def fetch_arxiv_papers(query="cat:cs.AI", max_results=10, days_back=7):
