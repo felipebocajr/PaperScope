@@ -4,3 +4,5 @@ data/
 old_data/
 logs/
 .env
+__pycache__/
+papers/
