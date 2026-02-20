@@ -1,308 +1,227 @@
 import arxiv
-import os
-from dotenv import load_dotenv
 import json
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-import time
-import logging
-from io import BytesIO
+import os
+import re
+from datetime import datetime
 
 import boto3
 import requests
-import re
+from dotenv import load_dotenv
+from pypdf import PdfReader
 
-try:
-    from pypdf import PdfReader
-except ImportError:
-    PdfReader = None
-
-# Load environment
 load_dotenv()
 
-# logging
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
-
+# Defaults (you can override per-call)
 DEFAULT_INFERENCE_PROFILE = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+DEFAULT_SCORING_MODEL_ID = "openai.gpt-oss-120b-1:0"
+SONNET_INFERENCE_PROFILE = "arn:aws:bedrock:us-east-1:836823680505:inference-profile/global.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
-# ============================================================================
-# ARXIV PAPER FETCHING
-# ============================================================================
+# Regex helpers
+RE_LEADING_REASONING = re.compile(r"^\s*<reasoning>.*?</reasoning>\s*", re.DOTALL)
 
-def arxiv_result_to_dict(r: arxiv.Result) -> dict:
-    """Convert arxiv.Result to dictionary."""
-    return {
-        "id": r.get_short_id(),
-        "title": r.title,
-        "summary": r.summary,
-        "published": r.published.strftime("%Y-%m-%d") if r.published else None,
-        "pdf_url": r.pdf_url,
+
+# -------------------------
+# Helpers
+# -------------------------
+
+def download_pdf(url: str, filename: str) -> str:
+    """Download a PDF from a URL and save locally."""
+    response = requests.get(url, timeout=60)
+    response.raise_for_status()
+    with open(filename, "wb") as f:
+        f.write(response.content)
+    return filename
+
+
+def extract_text_from_pdf(filename: str) -> str:
+    """Extract text from PDF using pypdf."""
+    reader = PdfReader(filename)
+    text = []
+    for page in reader.pages:
+        t = page.extract_text() or ""
+        text.append(t)
+    return "\n".join(text)
+
+
+def find_references_index(text: str) -> int:
+    """Try to cut off references/bibliography to reduce noise."""
+    lines = text.splitlines()
+    for idx, line in enumerate(lines):
+        s = line.strip().lower()
+        if s in ("references", "bibliography", "works cited"):
+            return idx
+    return -1
+
+
+def maybe_strip_code_fence(s: str) -> str:
+    s = s.strip()
+    if s.startswith("```"):
+        lines = s.split("\n")
+        if len(lines) >= 3 and lines[-1].strip().startswith("```"):
+            return "\n".join(lines[1:-1]).strip()
+    return s
+
+
+# -------------------------
+# Bedrock invocation
+# -------------------------
+
+def invoke_bedrock(
+    bedrock_client,
+    model_id: str,
+    prompt: str,
+    *,
+    max_tokens: int = 256,
+    temperature: float | None = None,
+    top_p: float | None = None,
+) -> str:
+    """Call Bedrock and return the text response.
+
+    Supports:
+      - Anthropic Claude models (Anthropic Messages schema)
+      - OpenAI GPT-OSS models on Bedrock (OpenAI chat-completions schema)
+
+    Notes:
+      - Bedrock InvokeModel may prefix reasoning wrapped in <reasoning> tags.
+      - This function strips that prefix for OpenAI models.
+    """
+
+    # ---- OpenAI GPT-OSS models (OpenAI chat-completions style body) ----
+    if model_id.startswith("openai."):
+        native_request = {
+            "messages": [
+                {"role": "system", "content": "Return only what the user asks for."},
+                {"role": "user", "content": prompt},
+            ],
+            "max_completion_tokens": max_tokens,
+            "temperature": 0.0 if temperature is None else float(temperature),
+            "top_p": 1.0 if top_p is None else float(top_p),
+            "stream": False,
+        }
+
+        response = bedrock_client.invoke_model(
+            modelId=model_id,
+            body=json.dumps(native_request),
+        )
+
+        raw = response.get("body")
+        if raw is None:
+            raise RuntimeError("Empty response body from Bedrock")
+
+        payload = raw.read()
+        if isinstance(payload, bytes):
+            payload = payload.decode("utf-8", errors="ignore")
+
+        response_obj = json.loads(payload)
+        actual_text = (
+            response_obj.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            or ""
+        )
+        actual_text = actual_text.strip()
+
+        # Strip leading reasoning if present
+        actual_text = RE_LEADING_REASONING.sub("", actual_text).strip()
+        actual_text = maybe_strip_code_fence(actual_text)
+        return actual_text
+
+    # ---- Anthropic models (your existing schema) ----
+    anthropic_body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
     }
 
+    if temperature is not None:
+        anthropic_body["temperature"] = float(temperature)
+    if top_p is not None:
+        anthropic_body["top_p"] = float(top_p)
 
-def fetch_arxiv_papers(query="cat:cs.AI", max_results=25, days_back=7):
-    """Fetch papers from arXiv."""
-    search = arxiv.Search(
-        query=query,
-        max_results=max_results,
-        sort_by=arxiv.SortCriterion.SubmittedDate,
-    )
-    # Configure client with delay to respect rate limits (3 seconds between requests)
-    client = arxiv.Client(
-        page_size=100,
-        delay_seconds=3.0,
-        num_retries=3
-    )
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
-
-    results = []
-    for r in client.results(search):
-        if r.published and r.published >= cutoff:
-            results.append(arxiv_result_to_dict(r))
-        else:
-            break
-
-    return results
-
-
-# ============================================================================
-# PHASE 1: GENERIC SCORING (title + abstract)
-# ============================================================================
-
-JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
-
-
-def build_scoring_prompt(paper: dict) -> str:
-    """Build prompt for generic paper scoring based on title and abstract."""
-    title = paper.get("title", "")
-    abstract = paper.get("summary", "")
-
-    return f"""You are a data science expert curating the most interesting AI/ML research papers for a LinkedIn audience of data scientists and engineers.
-
-IMPORTANT: You are evaluating recently published research from {datetime.now().strftime('%B %Y')}. Your training data may be outdated. Do not penalize papers for mentioning tools, models, or techniques that are newer than your knowledge cutoff. Focus on the research contribution itself.
-
-Score this paper with a single decimal score from 0.0 to 10.0 (use decimals for precision), considering:
-- Innovation: Does it challenge current assumptions or introduce a genuinely new approach?
-- Impact: Does it show significant performance improvements or strong real-world potential?
-- Methodology: Is the method solid, reproducible and clearly explained?
-
-Return ONLY valid JSON with exactly these keys:
-{{"score": <decimal number 0.0-10.0>, "reasoning": "<one sentence explaining the score>"}}
-
-Paper:
-Title: {title}
-
-Abstract:
-{abstract}
-
-JSON:""".strip()
-
-
-def parse_json_from_model_text(text: str) -> dict:
-    """Extract the first JSON object from model text."""
-    text = text.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        m = JSON_RE.search(text)
-        if not m:
-            raise
-        return json.loads(m.group(0))
-
-
-def invoke_bedrock(bedrock_client, model_id: str, prompt: str) -> str:
-    """Call Bedrock and return the text response."""
     response = bedrock_client.invoke_model(
         modelId=model_id,
-        body=json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 256,
-            "messages": [{"role": "user", "content": prompt}]
-        })
+        body=json.dumps(anthropic_body),
     )
 
     raw = response.get("body")
     if raw is None:
         raise RuntimeError("Empty response body from Bedrock")
 
-    text = raw.read()
-    if isinstance(text, bytes):
-        text = text.decode("utf-8", errors="ignore")
+    payload = raw.read()
+    if isinstance(payload, bytes):
+        payload = payload.decode("utf-8", errors="ignore")
 
-    response_obj = json.loads(text)
+    response_obj = json.loads(payload)
     actual_text = response_obj.get("content", [{}])[0].get("text", "")
-
-    # Strip markdown code blocks if present
-    actual_text = actual_text.strip()
-    if actual_text.startswith("```"):
-        lines = actual_text.split("\n")
-        actual_text = "\n".join(lines[1:-1]) if len(lines) > 2 else actual_text
-
+    actual_text = maybe_strip_code_fence(actual_text)
     return actual_text
 
 
-def score_papers_with_bedrock(
-    papers: list[dict],
-    model_id: str = DEFAULT_INFERENCE_PROFILE,
-    region: str = "us-east-1",
-) -> list[dict]:
-    """
-    Phase 1: Score each paper (title + abstract) with a generic 0-10 score.
-    Returns a list of dicts with id, score, and reasoning.
-    """
-    bedrock = boto3.client("bedrock-runtime", region_name=region)
-    scores: list[dict] = []
+# -------------------------
+# Prompt builders
+# -------------------------
 
-    for i, paper in enumerate(papers, start=1):
-        prompt = build_scoring_prompt(paper)
+def build_scoring_prompt(title: str, abstract: str) -> str:
+    return f"""
+You are evaluating an arXiv paper for inclusion in a weekly AI/ML digest.
 
-        last_err = None
-        for attempt in range(1, 6):
-            try:
-                actual_text = invoke_bedrock(bedrock, model_id, prompt)
-                data = parse_json_from_model_text(actual_text)
+Given the title and abstract, return ONLY valid JSON matching this exact format:
+{{"score": <float between 0.0 and 10.0, using one decimal place>, "reasoning": "<1-2 sentences>"}}
 
-                scores.append({
-                    "id": paper.get("id"),
-                    "score": float(data.get("score", 0)),
-                    "reasoning": data.get("reasoning", ""),
-                    "_title": paper.get("title"),
-                })
-                break
+Example output:
+{{"score": 8.7, "reasoning": "This paper introduces a highly novel architecture that significantly improves training efficiency."}}
 
-            except Exception as e:
-                last_err = e
-                logger.warning("Attempt %d failed for paper %d: %s", attempt, i, str(e))
-                time.sleep(min(2 ** attempt, 10))
-        else:
-            logger.error("Failed to score paper %d after retries: %s", i, str(last_err))
-            scores.append({
-                "id": paper.get("id"),
-                "score": 0.0,
-                "reasoning": "",
-                "_title": paper.get("title"),
-                "_error": str(last_err),
-            })
+Scoring guidelines:
+- Use decimal values (e.g., 7.4, 8.9) to provide precise, nuanced rankings. Do not limit your scores to whole numbers.
+- Prioritize papers whose primary focus is developing or researching AI/ML methods, architectures, training techniques, evaluation approaches, or theoretical foundations.
+- Papers that apply existing ML methods to domain-specific problems (without methodological innovation) should receive moderate scores.
+- If the abstract is vague or lacks clear AI/ML research contribution, score lower.
 
-        time.sleep(0.15)
+Title: {title}
+Abstract: {abstract}
 
-        if i % 10 == 0:
-            logger.info("Scored %d/%d papers", i, len(papers))
-
-    logger.info("Scoring complete: %d papers scored", len(scores))
-    return scores
+Return ONLY JSON:
+""".strip()
 
 
-def get_top_papers(papers: list[dict], scores: list[dict], top_n: int = 10) -> list[dict]:
-    """
-    Pick the top N papers by score.
-    Returns the full paper dicts (including pdf_url) for the top N.
-    """
-    # Build a lookup: id -> full paper dict
-    papers_by_id = {p["id"]: p for p in papers}
+def build_summary_prompt(paper_text: str, title: str) -> str:
+    return f"""
+You are an insightful human curator writing a weekly AI/ML research digest for practitioners (data scientists, ML engineers, and technical founders).
 
-    # Sort scores descending
-    sorted_scores = sorted(scores, key=lambda x: x["score"], reverse=True)
+<instructions>
+Your task is to write a short, engaging mini-article summarizing the provided research paper.
 
-    top = []
-    for s in sorted_scores[:top_n]:
-        paper = papers_by_id.get(s["id"])
-        if paper:
-            # Attach score and reasoning to the paper dict
-            paper["score"] = s["score"]
-            paper["reasoning"] = s["reasoning"]
-            top.append(paper)
+Style & Tone:
+- Write in smoothly flowing prose paragraphs. Your response must be standard text without markdown headers, numbered lists, or bullet points.
+- Use active voice and vary your sentence lengths to keep the reading dynamic.
+- If you mention a technical term, briefly clarify it in plain language.
+- Write directly and affirmatively. Avoid clichés like "Imagine a...", "In the rapidly evolving landscape...", or "This paper proposes...".
 
-    return top
+Structure & Flow:
+- Hook the reader immediately with a strong opening sentence that highlights why this specific work is interesting or what core problem it solves.
+- Explain what the authors actually did differently from typical approaches. 
+- Weave in at least one concrete detail (e.g., a specific scale, dataset name, or performance metric) to ground the summary in reality.
+- Conclude by explaining exactly why this matters in practice for real-world engineering workflows.
 
+Output Format:
+- Keep the text concise, ideally between 160 and 220 words formatted across 2 to 4 natural paragraphs.
+- You must output your final article strictly inside <article> tags. Do not output any conversational filler.
+</instructions>
 
-# ============================================================================
-# PHASE 2: PDF EXTRACTION AND DETAILED SCORING
-# ============================================================================
+<paper>
+Title: {title}
 
-
-def download_pdf(url: str, timeout: int = 30) -> bytes:
-    """Download PDF from URL and return bytes."""
-    try:
-        response = requests.get(url, timeout=timeout, headers={
-            'User-Agent': 'Mozilla/5.0 (compatible; PaperScope/1.0)'
-        })
-        response.raise_for_status()
-        return response.content
-    except Exception as e:
-        logger.error("Failed to download PDF from %s: %s", url, str(e))
-        raise
-
-
-def extract_text_from_pdf(pdf_bytes: bytes, stop_at_references: bool = True) -> str:
-    """
-    Extract text from PDF bytes.
-    Optionally stops at References/Bibliography section.
-    """
-    if PdfReader is None:
-        raise ImportError("pypdf library not installed")
-    
-    try:
-        pdf = PdfReader(BytesIO(pdf_bytes))
-        full_text = []
-        
-        for page_num, page in enumerate(pdf.pages):
-            text = page.extract_text()
-            if not text:
-                continue
-                
-            # Check if we've reached the references section
-            if stop_at_references:
-                # Look for common references headers
-                lines = text.split('\n')
-                for i, line in enumerate(lines):
-                    line_lower = line.strip().lower()
-                    # Common reference section headers
-                    if line_lower in ['references', 'bibliography', 'works cited']:
-                        # Include text up to this line
-                        full_text.append('\n'.join(lines[:i]))
-                        logger.info("Stopped at references section on page %d", page_num + 1)
-                        return '\n'.join(full_text)
-            
-            full_text.append(text)
-        
-        return '\n'.join(full_text)
-    
-    except Exception as e:
-        logger.error("Failed to extract text from PDF: %s", str(e))
-        raise
-
-
-def fetch_and_extract_paper_text(paper: dict) -> str:
-    """
-    Download PDF and extract text for a paper.
-    Returns the extracted text (stopping at references).
-    """
-    pdf_url = paper.get("pdf_url")
-    if not pdf_url:
-        raise ValueError(f"Paper {paper.get('id')} has no pdf_url")
-    
-    logger.info("Downloading PDF: %s", paper.get("title", "Unknown")[:50])
-    pdf_bytes = download_pdf(pdf_url)
-    
-    logger.info("Extracting text from PDF...")
-    text = extract_text_from_pdf(pdf_bytes, stop_at_references=True)
-    
-    logger.info("Extracted %d characters", len(text))
-    return text
+{paper_text}
+</paper>
+""".strip()
 
 
 def build_detailed_scoring_prompt(paper_text: str, title: str) -> str:
-    """Build prompt for detailed 3-criteria scoring based on full PDF."""
-    return f"""You are a data science expert curating the most interesting AI/ML research papers for a LinkedIn audience of data scientists and engineers.
+    """Prompt for Phase 2: detailed scoring with 3 criteria based on full PDF."""
+    return f"""
+You are evaluating a research paper in detail for an AI/ML digest.
 
-IMPORTANT: You are evaluating recently published research from {datetime.now().strftime('%B %Y')}. Your training data may be outdated. Do not penalize papers for mentioning tools, models, or techniques that are newer than your knowledge cutoff. Focus on the research contribution itself.
+IMPORTANT: You are evaluating recently published research from {datetime.utcnow().strftime('%B %Y')}. Your training data may be outdated. Do not penalize papers for mentioning tools, models, or techniques that are newer than your knowledge cutoff. Focus on the research contribution itself.
 
 Score this paper on 3 separate criteria (each 0.0-10.0, use decimals):
 
@@ -323,397 +242,259 @@ Full paper:
 JSON:""".strip()
 
 
-def score_papers_with_pdf(
-    papers: list[dict],
-    model_id: str = DEFAULT_INFERENCE_PROFILE,
-    region: str = "us-east-1",
-) -> list[dict]:
-    """
-    Phase 2: Download PDFs for papers, score them with detailed 3-criteria scoring.
-    Returns list of papers with detailed scores and weighted final score.
-    """
-    bedrock = boto3.client("bedrock-runtime", region_name=region)
-    detailed_scores: list[dict] = []
+def score_top_papers_with_pdf(papers, model_id: str = DEFAULT_INFERENCE_PROFILE):
+    """Phase 2: Score top papers with full PDF content using 3 criteria."""
+    bedrock_runtime = boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", "us-east-1"))
 
-    for i, paper in enumerate(papers, start=1):
-        logger.info("\n" + "="*60)
-        logger.info("Processing paper %d/%d", i, len(papers))
-        logger.info("="*60)
+    detailed_scores = []
+    for i, paper in enumerate(papers, 1):
+        print(f"\nPhase 2: Processing paper {i}/{len(papers)}")
+        print(f"Title: {paper['title'][:80]}")
         
         try:
             # Extract PDF text
             paper_text = fetch_and_extract_paper_text(paper)
             
-            # Build prompt
-            prompt = build_detailed_scoring_prompt(paper_text, paper.get("title", ""))
+            # Build detailed scoring prompt
+            prompt = build_detailed_scoring_prompt(paper_text, paper["title"])
             
-            # Call model with retry logic
-            last_err = None
-            for attempt in range(1, 6):
-                try:
-                    actual_text = invoke_bedrock(bedrock, model_id, prompt)
-                    data = parse_json_from_model_text(actual_text)
-                    
-                    # Extract individual scores
-                    innovation = float(data.get("innovation", 0))
-                    impact = float(data.get("impact", 0))
-                    methodology = float(data.get("methodology", 0))
-                    reasoning = data.get("reasoning", "")
-                    
-                    # Calculate weighted score: 50% innovation, 30% impact, 20% methodology
-                    weighted_score = (innovation * 0.5) + (impact * 0.3) + (methodology * 0.2)
-                    
-                    detailed_scores.append({
-                        "id": paper.get("id"),
-                        "innovation": innovation,
-                        "impact": impact,
-                        "methodology": methodology,
-                        "weighted_score": round(weighted_score, 2),
-                        "reasoning": reasoning,
-                        "_title": paper.get("title"),
-                        "_pdf_url": paper.get("pdf_url"),
-                    })
-                    
-                    logger.info("Scores - Innovation: %.1f, Impact: %.1f, Methodology: %.1f", 
-                               innovation, impact, methodology)
-                    logger.info("Weighted score: %.2f", weighted_score)
-                    break
-                    
-                except Exception as e:
-                    last_err = e
-                    logger.warning("Attempt %d failed: %s", attempt, str(e))
-                    time.sleep(min(2 ** attempt, 10))
-            else:
-                logger.error("Failed to score paper after retries: %s", str(last_err))
-                detailed_scores.append({
-                    "id": paper.get("id"),
-                    "innovation": 0,
-                    "impact": 0,
-                    "methodology": 0,
-                    "weighted_score": 0,
-                    "reasoning": "",
-                    "_title": paper.get("title"),
-                    "_error": str(last_err),
-                })
-        
-        except Exception as e:
-            logger.error("Failed to process paper: %s", str(e))
+            # Call model
+            response_text = invoke_bedrock(
+                bedrock_runtime,
+                model_id,
+                prompt,
+                max_tokens=512,
+                temperature=0.0,
+            )
+            
+            # Parse response
+            data = json.loads(response_text)
+            innovation = float(data.get("innovation", 0))
+            impact = float(data.get("impact", 0))
+            methodology = float(data.get("methodology", 0))
+            reasoning = str(data.get("reasoning", "")).strip()
+            
+            # Calculate weighted score: 50% innovation, 30% impact, 20% methodology
+            weighted_score = (innovation * 0.5) + (impact * 0.3) + (methodology * 0.2)
+            
+            print(f"Scores - Innovation: {innovation:.1f}, Impact: {impact:.1f}, Methodology: {methodology:.1f}")
+            print(f"Weighted score: {weighted_score:.2f}")
+            
             detailed_scores.append({
-                "id": paper.get("id"),
+                "entry_id": paper["entry_id"],
+                "innovation": innovation,
+                "impact": impact,
+                "methodology": methodology,
+                "weighted_score": round(weighted_score, 2),
+                "reasoning": reasoning,
+            })
+            
+        except Exception as e:
+            print(f"Error processing paper: {e}")
+            detailed_scores.append({
+                "entry_id": paper["entry_id"],
                 "innovation": 0,
                 "impact": 0,
                 "methodology": 0,
                 "weighted_score": 0,
-                "reasoning": "",
-                "_title": paper.get("title"),
-                "_error": str(e),
+                "reasoning": f"Error: {str(e)}",
             })
-        
-        time.sleep(0.2)
     
-    logger.info("\nDetailed scoring complete: %d papers scored", len(detailed_scores))
     return detailed_scores
 
 
-def get_top_papers_by_weighted_score(
-    papers: list[dict],
-    detailed_scores: list[dict],
-    top_n: int = 3
-) -> list[dict]:
-    """
-    Select top N papers by weighted score from Phase 2.
-    Returns full paper dicts with all scoring details attached.
-    """
-    papers_by_id = {p["id"]: p for p in papers}
-    
-    # Sort by weighted_score descending
-    sorted_scores = sorted(detailed_scores, key=lambda x: x["weighted_score"], reverse=True)
-    
-    top = []
-    for s in sorted_scores[:top_n]:
-        paper = papers_by_id.get(s["id"])
-        if paper:
-            # Attach all detailed scores to paper
-            paper["innovation"] = s["innovation"]
-            paper["impact"] = s["impact"]
-            paper["methodology"] = s["methodology"]
-            paper["weighted_score"] = s["weighted_score"]
-            paper["detailed_reasoning"] = s["reasoning"]
-            top.append(paper)
-    
-    return top
+# -------------------------
+# Pipeline steps
+# -------------------------
 
-
-# ============================================================================
-# PHASE 3: SUMMARY GENERATION
-# ============================================================================
-
-def build_summary_prompt(paper_text: str, title: str) -> str:
-    """Build prompt for generating accessible summaries of final papers."""
-    return f"""You are writing for an audience of data scientists and engineers, including those early in their careers who want to understand cutting-edge AI/ML research.
-
-Write a clear, accessible summary (3-4 paragraphs) of this research paper that explains:
-1. What problem does this paper solve and why does it matter?
-2. What methodology or approach does the paper use? (Explain the key techniques in plain language)
-3. What is the main contribution or innovation?
-4. Why should data scientists care? What are the practical implications or potential applications?
-
-Use plain English. Avoid jargon where possible, or explain technical terms when necessary. Focus on making the research understandable and relevant to practitioners.
-
-Title: {title}
-
-Full paper:
-{paper_text}
-
-Summary:""".strip()
-
-
-def generate_summaries_for_papers(
-    papers: list[dict],
-    model_id: str = DEFAULT_INFERENCE_PROFILE,
-    region: str = "us-east-1",
-) -> list[dict]:
-    """
-    Phase 3: Generate accessible summaries for final papers.
-    Returns papers with summaries attached.
-    """
-    bedrock = boto3.client("bedrock-runtime", region_name=region)
-    papers_with_summaries = []
-
-    for i, paper in enumerate(papers, start=1):
-        logger.info("\n" + "="*60)
-        logger.info("Generating summary for paper %d/%d", i, len(papers))
-        logger.info("Title: %s", paper.get("title", "")[:80])
-        logger.info("="*60)
-        
-        try:
-            # Extract PDF text
-            paper_text = fetch_and_extract_paper_text(paper)
-            
-            # Build summary prompt
-            prompt = build_summary_prompt(paper_text, paper.get("title", ""))
-            
-            # Call model with retry logic
-            last_err = None
-            for attempt in range(1, 6):
-                try:
-                    # Note: summaries can be longer, so increase max_tokens
-                    response = bedrock.invoke_model(
-                        modelId=model_id,
-                        body=json.dumps({
-                            "anthropic_version": "bedrock-2023-05-31",
-                            "max_tokens": 1500,  # Longer for summaries
-                            "messages": [{"role": "user", "content": prompt}]
-                        })
-                    )
-                    
-                    raw = response.get("body")
-                    if raw is None:
-                        raise RuntimeError("Empty response body from Bedrock")
-                    
-                    text = raw.read()
-                    if isinstance(text, bytes):
-                        text = text.decode("utf-8", errors="ignore")
-                    
-                    response_obj = json.loads(text)
-                    summary = response_obj.get("content", [{}])[0].get("text", "").strip()
-                    
-                    # Attach summary to paper
-                    paper_copy = paper.copy()
-                    paper_copy["summary"] = summary
-                    papers_with_summaries.append(paper_copy)
-                    
-                    logger.info("Summary generated (%d characters)", len(summary))
-                    break
-                    
-                except Exception as e:
-                    last_err = e
-                    logger.warning("Attempt %d failed: %s", attempt, str(e))
-                    time.sleep(min(2 ** attempt, 10))
-            else:
-                logger.error("Failed to generate summary after retries: %s", str(last_err))
-                paper_copy = paper.copy()
-                paper_copy["summary"] = ""
-                paper_copy["_error"] = str(last_err)
-                papers_with_summaries.append(paper_copy)
-        
-        except Exception as e:
-            logger.error("Failed to process paper: %s", str(e))
-            paper_copy = paper.copy()
-            paper_copy["summary"] = ""
-            paper_copy["_error"] = str(e)
-            papers_with_summaries.append(paper_copy)
-        
-        time.sleep(0.2)
-    
-    logger.info("\nSummary generation complete!")
-    return papers_with_summaries
-
-
-def create_weekly_output(papers_with_summaries: list[dict], week_date: str = None) -> dict:
-    """
-    Create the final weekly output structure for the static website.
-    """
-    if week_date is None:
-        week_date = datetime.now().strftime("%Y-%m-%d")
-    
-    weekly_data = {
-        "week_date": week_date,
-        "papers": []
-    }
-    
-    for paper in papers_with_summaries:
-        weekly_data["papers"].append({
-            "title": paper.get("title"),
-            "summary": paper.get("summary", ""),
-            "arxiv_url": f"https://arxiv.org/abs/{paper.get('id')}",
-            "arxiv_id": paper.get("id"),
-            "scores": {
-                "innovation": paper.get("innovation"),
-                "impact": paper.get("impact"),
-                "methodology": paper.get("methodology"),
-                "weighted": paper.get("weighted_score")
+def fetch_papers(query: str, max_results: int = 100):
+    search = arxiv.Search(
+        query=query,
+        max_results=max_results,
+        sort_by=arxiv.SortCriterion.SubmittedDate,
+        sort_order=arxiv.SortOrder.Descending,
+    )
+    papers = []
+    for result in search.results():
+        papers.append(
+            {
+                "title": result.title,
+                "authors": [a.name for a in result.authors],
+                "published": result.published.strftime("%Y-%m-%d"),
+                "summary": result.summary,
+                "pdf_url": result.pdf_url,
+                "entry_id": result.entry_id,
             }
-        })
-    
-    return weekly_data
+        )
+    return papers
 
 
-# ============================================================================
-# FILE I/O
-# ============================================================================
+def score_papers_with_bedrock(papers, model_id: str = DEFAULT_SCORING_MODEL_ID):
+    bedrock_runtime = boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", "us-east-1"))
 
-def save_json(data, filepath):
-    """Save data to JSON file."""
-    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    scores = []
+    for paper in papers:
+        prompt = build_scoring_prompt(paper["title"], paper["summary"])
+        response_text = invoke_bedrock(
+            bedrock_runtime,
+            model_id,
+            prompt,
+            max_tokens=256,
+            temperature=0.0,
+            top_p=1.0,
+        )
+
+        try:
+            data = json.loads(response_text)
+            score = float(data.get("score", 0))
+            reasoning = str(data.get("reasoning", "")).strip()
+        except Exception:
+            score = 0.0
+            reasoning = "Failed to parse model JSON response."
+
+        scores.append({"entry_id": paper["entry_id"], "score": score, "reasoning": reasoning})
+
+    return scores
 
 
-def load_json(filepath):
-    """Load data from JSON file."""
-    with open(filepath, "r", encoding="utf-8") as f:
-        content = f.read().strip()
-        if not content:
-            return None
-        return json.loads(content)
+def fetch_and_extract_paper_text(paper: dict, out_dir: str = "./papers") -> str:
+    os.makedirs(out_dir, exist_ok=True)
+    pdf_path = os.path.join(out_dir, paper["entry_id"].split("/")[-1] + ".pdf")
+    download_pdf(paper["pdf_url"], pdf_path)
+    text = extract_text_from_pdf(pdf_path)
+
+    # Attempt to cut off references
+    ref_idx = find_references_index(text)
+    if ref_idx != -1:
+        lines = text.splitlines()
+        text = "\n".join(lines[:ref_idx])
+
+    return text
 
 
-# ============================================================================
-# MAIN
-# ============================================================================
+def generate_summaries_for_papers(papers, model_id: str = DEFAULT_INFERENCE_PROFILE):
+    bedrock_runtime = boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", "us-east-1"))
+
+    for paper in papers:
+        paper_text = fetch_and_extract_paper_text(paper)
+        prompt = build_summary_prompt(paper_text, paper["title"])
+
+        summary_text = invoke_bedrock(
+            bedrock_runtime,
+            model_id,
+            prompt,
+            max_tokens=900,
+        )
+
+        paper["summary"] = summary_text
+
+    return papers
+
+
+# -------------------------
+# Entry point
+# -------------------------
+
+def main():
+    query = os.getenv("ARXIV_QUERY", "cat:cs.AI")
+    max_results = int(os.getenv("ARXIV_MAX_RESULTS", "50"))
+
+    # Phase 1: Fetch and score papers with GPT-OSS 120B
+    print("="*60)
+    print("PHASE 1: Fetching and scoring papers with GPT-OSS 120B")
+    print("="*60)
+    papers = fetch_papers(query=query, max_results=max_results)
+    print(f"Fetched {len(papers)} papers")
+
+    scores = score_papers_with_bedrock(papers, model_id=DEFAULT_SCORING_MODEL_ID)
+
+    # Attach scores
+    score_map = {s["entry_id"]: s for s in scores}
+    for p in papers:
+        p["score"] = score_map.get(p["entry_id"], {}).get("score", 0)
+        p["score_reasoning"] = score_map.get(p["entry_id"], {}).get("reasoning", "")
+
+    # Sort by score descending and take top 10
+    papers.sort(key=lambda x: x.get("score", 0), reverse=True)
+    top_10_papers = papers[:10]
+
+    print(f"\nTop 10 papers from Phase 1:")
+    for i, p in enumerate(top_10_papers, 1):
+        print(f"{i}. [{p['score']:.1f}] {p['title'][:80]}")
+
+    # Phase 2: Detailed scoring of top 10 with Haiku 4.5 (PDF analysis)
+    print("\n" + "="*60)
+    print("PHASE 2: Detailed scoring of top 10 papers with Haiku 4.5")
+    print("="*60)
+    detailed_scores = score_top_papers_with_pdf(top_10_papers, model_id=DEFAULT_INFERENCE_PROFILE)
+
+    # Attach detailed scores to papers
+    detailed_score_map = {s["entry_id"]: s for s in detailed_scores}
+    for p in top_10_papers:
+        details = detailed_score_map.get(p["entry_id"], {})
+        p["innovation"] = details.get("innovation", 0)
+        p["impact"] = details.get("impact", 0)
+        p["methodology"] = details.get("methodology", 0)
+        p["weighted_score"] = details.get("weighted_score", 0)
+        p["detailed_reasoning"] = details.get("reasoning", "")
+
+    # Sort by weighted score and take top 3
+    top_10_papers.sort(key=lambda x: x.get("weighted_score", 0), reverse=True)
+    top_3_papers = top_10_papers[:3]
+
+    print(f"\n" + "="*60)
+    print("TOP 3 PAPERS SELECTED (after Phase 2)")
+    print("="*60)
+    for i, p in enumerate(top_3_papers, 1):
+        print(f"\n{i}. [Weighted: {p['weighted_score']:.2f}] {p['title'][:80]}")
+        print(f"   Innovation: {p['innovation']:.1f} | Impact: {p['impact']:.1f} | Methodology: {p['methodology']:.1f}")
+
+    # Phase 3a: Generate summaries with GPT-OSS
+    print("\n" + "="*60)
+    print("PHASE 3a: Generating summaries with GPT-OSS 120B")
+    print("="*60)
+    papers_gpt = [p.copy() for p in top_3_papers]
+    papers_gpt = generate_summaries_for_papers(papers_gpt, model_id=DEFAULT_SCORING_MODEL_ID)
+
+    out_gpt = {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "model": "GPT-OSS 120B",
+        "query": query,
+        "papers": papers_gpt,
+    }
+
+    out_path_gpt = "weekly_digest_gpt.json"
+    with open(out_path_gpt, "w", encoding="utf-8") as f:
+        json.dump(out_gpt, f, ensure_ascii=False, indent=2)
+    print(f"Saved: {out_path_gpt}")
+
+    # Phase 3b: Generate summaries with Sonnet 4.5
+    print("\n" + "="*60)
+    print("PHASE 3b: Generating summaries with Sonnet 4.5")
+    print("="*60)
+    papers_sonnet = [p.copy() for p in top_3_papers]
+    papers_sonnet = generate_summaries_for_papers(papers_sonnet, model_id=SONNET_INFERENCE_PROFILE)
+
+    out_sonnet = {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "model": "Claude Sonnet 4.5",
+        "query": query,
+        "papers": papers_sonnet,
+    }
+
+    out_path_sonnet = "weekly_digest_sonnet.json"
+    with open(out_path_sonnet, "w", encoding="utf-8") as f:
+        json.dump(out_sonnet, f, ensure_ascii=False, indent=2)
+    print(f"Saved: {out_path_sonnet}")
+
+    print("\n" + "="*60)
+    print("PIPELINE COMPLETE!")
+    print("="*60)
+    print(f"Compare the two outputs:")
+    print(f"  - GPT-OSS: {out_path_gpt}")
+    print(f"  - Sonnet:  {out_path_sonnet}")
+
+
 
 if __name__ == "__main__":
-
-    # -------------------------------------------------------------------------
-    # Step 1: Fetch papers
-    # -------------------------------------------------------------------------
-    papers_path = Path("data/papers.json")
-    if not papers_path.exists():
-        logger.info("Fetching papers from arXiv...")
-        start = time.time()
-        papers = fetch_arxiv_papers()
-        logger.info("Fetched %d papers in %.2f seconds", len(papers), time.time() - start)
-        save_json(papers, "data/papers.json")
-        logger.info("Saved to data/papers.json")
-    else:
-        logger.info("Papers already exist, loading from data/papers.json")
-        papers = load_json("data/papers.json")
-        logger.info("Loaded %d papers", len(papers))
-
-    # -------------------------------------------------------------------------
-    # Step 2: Score all papers (Phase 1 - generic score)
-    # -------------------------------------------------------------------------
-    scores_path = Path("data/scores.json")
-    if not scores_path.exists():
-        logger.info("Scoring papers with Bedrock...")
-        scores = score_papers_with_bedrock(papers)
-        save_json(scores, "data/scores.json")
-        logger.info("Saved scores to data/scores.json")
-    else:
-        logger.info("Scores already exist, loading from data/scores.json")
-        scores = load_json("data/scores.json")
-
-    # -------------------------------------------------------------------------
-    # Step 3: Pick top 10 papers
-    # -------------------------------------------------------------------------
-    top_papers_path = Path("data/top_papers.json")
-    if not top_papers_path.exists():
-        top_papers = get_top_papers(papers, scores, top_n=10)
-        save_json(top_papers, "data/top_papers.json")
-        logger.info("Top 10 papers saved to data/top_papers.json")
-    else:
-        logger.info("Top papers already exist, loading from data/top_papers.json")
-        top_papers = load_json("data/top_papers.json")
-
-    logger.info("\nTop 10 papers:")
-    for i, p in enumerate(top_papers, 1):
-        logger.info("%d. [%.1f] %s", i, p["score"], p["title"])
-
-    # -------------------------------------------------------------------------
-    # Step 4: Phase 2 - Detailed scoring with PDF content (top 10 → top 3)
-    # -------------------------------------------------------------------------
-    detailed_scores_path = Path("data/detailed_scores.json")
-    if not detailed_scores_path.exists():
-        logger.info("\n" + "="*60)
-        logger.info("Phase 2: Detailed scoring with PDF content...")
-        logger.info("="*60)
-        
-        detailed_scores = score_papers_with_pdf(top_papers)
-        save_json(detailed_scores, "data/detailed_scores.json")
-        logger.info("Saved detailed scores to data/detailed_scores.json")
-    else:
-        logger.info("Detailed scores already exist, loading from data/detailed_scores.json")
-        detailed_scores = load_json("data/detailed_scores.json")
-
-    # -------------------------------------------------------------------------
-    # Step 5: Select final top 3 papers
-    # -------------------------------------------------------------------------
-    final_top_3 = get_top_papers_by_weighted_score(top_papers, detailed_scores, top_n=3)
-    save_json(final_top_3, "data/final_top_3.json")
-    logger.info("\n" + "="*60)
-    logger.info("FINAL TOP 3 PAPERS")
-    logger.info("="*60)
-    
-    for i, p in enumerate(final_top_3, 1):
-        logger.info("\n%d. [Weighted: %.2f] %s", i, p["weighted_score"], p["title"])
-        logger.info("   Innovation: %.1f | Impact: %.1f | Methodology: %.1f",
-                   p["innovation"], p["impact"], p["methodology"])
-
-    # -------------------------------------------------------------------------
-    # Step 6: Phase 3 - Generate accessible summaries
-    # -------------------------------------------------------------------------
-    summaries_path = Path("data/papers_with_summaries.json")
-    if not summaries_path.exists():
-        logger.info("\n" + "="*60)
-        logger.info("Phase 3: Generating accessible summaries...")
-        logger.info("="*60)
-        
-        papers_with_summaries = generate_summaries_for_papers(final_top_3)
-        save_json(papers_with_summaries, "data/papers_with_summaries.json")
-        logger.info("Saved papers with summaries to data/papers_with_summaries.json")
-    else:
-        logger.info("Summaries already exist, loading from data/papers_with_summaries.json")
-        papers_with_summaries = load_json("data/papers_with_summaries.json")
-
-    # -------------------------------------------------------------------------
-    # Step 7: Create weekly output for website
-    # -------------------------------------------------------------------------
-    week_date = datetime.now().strftime("%Y-%m-%d")
-    weekly_output = create_weekly_output(papers_with_summaries, week_date)
-    
-    # Save to weeks directory
-    weeks_dir = Path("data/weeks")
-    weeks_dir.mkdir(parents=True, exist_ok=True)
-    weekly_file = weeks_dir / f"{week_date}.json"
-    save_json(weekly_output, str(weekly_file))
-    
-    logger.info("\n" + "="*60)
-    logger.info("PIPELINE COMPLETE!")
-    logger.info("="*60)
-    logger.info("Weekly output saved to: %s", weekly_file)
-    logger.info("\nFinal papers for week of %s:", week_date)
-    for i, paper in enumerate(weekly_output["papers"], 1):
-        logger.info("\n%d. %s", i, paper["title"])
-        logger.info("   arXiv: %s", paper["arxiv_url"])
-        logger.info("   Summary preview: %s...", paper["summary"][:100])
+    main()
