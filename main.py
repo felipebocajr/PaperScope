@@ -564,6 +564,34 @@ def create_weekly_output(winners: Dict[str, Paper], week_date: str) -> dict:
 
 
 # -------------------------
+# S3 upload helper
+# -------------------------
+
+def upload_output_file_to_s3(local_path: Path):
+    """Optionally push the JSON file to S3 if OUTPUT_BUCKET is configured."""
+    bucket = os.getenv("OUTPUT_BUCKET", "").strip()
+    if not bucket:
+        print("S3 upload disabled (OUTPUT_BUCKET not set)")
+        return
+    prefix = os.getenv("OUTPUT_PREFIX", "").strip()
+    # build key with optional prefix
+    if prefix:
+        # ensure no leading/trailing slashes on prefix
+        prefix = prefix.strip("/")
+        key = f"{prefix}/{local_path.name}"
+    else:
+        key = local_path.name
+
+    s3 = boto3.client("s3", region_name=AWS_REGION)
+    try:
+        print(f"Uploading {local_path} to s3://{bucket}/{key} ...")
+        s3.upload_file(str(local_path), bucket, key)
+        print(f"✓ Uploaded {local_path.name} to s3://{bucket}/{key}")
+    except Exception as e:
+        print(f"Error uploading to S3: {e}")
+
+
+# -------------------------
 # Main
 # -------------------------
 
@@ -590,6 +618,9 @@ def main():
     out_file = OUT_DIR / f"digest_{week_date}.json"
     with open(out_file, 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
+
+    # optionally upload to S3 if configured
+    upload_output_file_to_s3(out_file)
     
     print("\n" + "="*60)
     print("PIPELINE COMPLETE!")

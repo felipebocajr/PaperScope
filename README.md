@@ -66,6 +66,19 @@ Edit `main.py` to customize:
 - `aggregate_signals()` - Top N items to track
 - File paths for saving data
 
+### S3 Upload (optional)
+The pipeline can automatically upload the generated weekly digest JSON to an S3 bucket. Set the following environment variables in your `.env` or shell:
+
+```bash
+# Leave empty to disable S3 upload
+OUTPUT_BUCKET=ai-research-digest
+
+# Optional prefix/folder inside the bucket (e.g. "weeks")
+OUTPUT_PREFIX=weeks
+```
+
+If `OUTPUT_BUCKET` is not set or empty, the upload step is skipped. The object key will be `<prefix>/<filename>` if a prefix is provided, otherwise just the filename.
+
 ## Code Organization
 
 The code is organized by function groups:
