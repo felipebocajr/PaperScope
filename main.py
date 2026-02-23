@@ -89,8 +89,8 @@ PHASE2_MAX_TOKENS = 512
 PHASE2_TEMPERATURE = 0.0
 
 PHASE3_MAX_TOKENS = 900
-PHASE3_TEMPERATURE = 0.5
-PHASE3_TOP_P = 0.8
+PHASE3_TEMPERATURE = 0.6
+PHASE3_TOP_P = 0.95
 
 # Regex helpers
 RE_LEADING_REASONING = re.compile(r"^\s*<reasoning>.*?</reasoning>\s*", re.DOTALL)
@@ -263,10 +263,11 @@ Readers keep up with research but don't read full papers. They understand ML fun
 
 <content_structure>
 Write 3-4 short paragraphs that flow naturally:
-1. Start with a compelling hook (what's interesting or surprising?)
-2. Explain the core approach and what changed versus typical methods
-3. Include 1-2 concrete details (metrics, scale, dataset, or key results)
-4. Close with practical implications (why should practitioners care?)
+- Open with a compelling hook (what's interesting or surprising?)
+- Explain the core approach and what changed versus typical methods
+- Include 1-2 concrete details (metrics, scale, dataset, or key results)
+- Close naturally by highlighting what makes this work significant (practical value, 
+  theoretical insight, or methodological advance - whichever fits best)
 </content_structure>
 
 <tone_guidelines>
