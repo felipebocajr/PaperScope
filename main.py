@@ -23,6 +23,10 @@ load_dotenv()
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 GPT_OSS_120B_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "openai.gpt-oss-120b-1:0")
 
+# Optional: S3 Upload
+OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET", "")
+OUTPUT_PREFIX = os.getenv("OUTPUT_PREFIX", "")
+
 # Topics with search queries
 TOPIC_QUERIES = {
     "agentic_ai": {
@@ -88,7 +92,7 @@ PHASE1_TEMPERATURE = 0.0
 
 # Massively increased tokens to prevent "Unterminated string" errors during batch JSON generation
 PHASE2_MAX_TOKENS = 2500 
-PHASE2_TEMPERATURE = 0.0
+PHASE2_TEMPERATURE = 0.5  # Increased to prevent identical scoring (mode collapse)
 
 PHASE3_MAX_TOKENS = 900
 PHASE3_TEMPERATURE = 0.5
@@ -228,60 +232,53 @@ def invoke_bedrock(
 # -------------------------
 
 def build_comparative_batch_scoring_prompt(papers_batch: List[Paper]) -> str:
-    """Score a batch of papers comparatively with calibration."""
+    """Score a batch of papers comparatively using the optimized prompt."""
     papers_text = ""
     for i, paper in enumerate(papers_batch, 1):
         papers_text += f"\n{'='*60}\nPAPER {i}:\nTitle: {paper.title}\n\nAbstract:\n{paper.abstract}\n"
     
-    # FIXED: Python 3.12 datetime warning resolved using timezone.utc
     current_month_year = datetime.now(timezone.utc).strftime('%B %Y')
+    num_papers = len(papers_batch)
     
-    return f"""You are evaluating research papers for an AI/ML digest.
+    return f"""You are an expert AI/ML research evaluator for a monthly digest publication. Your task is to comparatively evaluate and score a batch of recently published research papers from {current_month_year}.
 
-IMPORTANT: You are evaluating recently published research from {current_month_year}. Do not penalize papers for mentioning newer tools or models.
+CONTEXT & CONSTRAINTS:
+- Evaluation period: Papers published in {current_month_year}
+- Do NOT penalize papers for mentioning recent tools, models, or techniques
+- You are evaluating these papers against each other AND against typical arXiv submission standards
+- Most papers should fall within the 4.0-8.5 score range
+- Avoid score clustering around 8.0
 
-You will score {len(papers_batch)} papers on 3 criteria (each 0.0-10.0, use decimals):
+SCORING CRITERIA (0.0-10.0 scale, use decimals):
+- Innovation (50% weight): Does the paper challenge assumptions or introduce genuinely novel approaches?
+- Impact (30% weight): Performance improvements? Real-world application potential?
+- Methodology (20% weight): Well-explained? Reproducible? Solid technical approach?
 
-1. innovation (weight 50%): Does it challenge assumptions or introduce genuinely new approaches?
-2. impact (weight 30%): Performance improvements? Real-world application potential?
-3. methodology (weight 20%): Well-explained? Reproducible? Solid approach?
+SCORING GUIDELINES:
+- 9.0-10.0: Groundbreaking work that will likely be cited for years (rare: ~1% of papers)
+- 7.5-8.9: Strong contribution with clear novelty and solid execution (top 10-15% of papers)
+- 5.5-7.4: Decent work but incremental improvement or limited scope (typical good paper)
+- 3.0-5.4: Marginal contribution or significant methodological concerns
+- 0.0-2.9: Fundamentally flawed or trivial work (rare)
 
-<calibration>
-Use the FULL 0-10 scale. Here's what each range means:
-
-9.0-10.0: Groundbreaking work that will likely be cited for years (rare - maybe 1 in 100 papers)
-7.5-8.9: Strong contribution with clear novelty and solid execution (top 10-15% of papers)
-5.5-7.4: Decent work but incremental improvement or limited scope (typical good paper)
-3.0-5.4: Marginal contribution or significant methodological concerns
-0.0-2.9: Fundamentally flawed or trivial work (rare)
-
-Most papers should fall in the 4.0-8.5 range. Don't cluster everything around 8.0!
-</calibration>
-
-<comparative_evaluation>
-Compare these {len(papers_batch)} papers to each other AND to typical arXiv submissions:
+COMPARATIVE ANALYSIS QUESTIONS:
 - Which papers stand out as exceptional within this batch?
-- Which are solid but incremental?
-- Which have significant limitations?
-- Use the full score range - if all papers seem similar quality, you're not evaluating critically enough
-</comparative_evaluation>
+- Which papers are solid but incremental contributions?
+- Which papers have significant limitations or flaws?
+- If all papers seem similar quality, re-evaluate more critically
 
-CRITICAL JSON RULES:
-1. Return ONLY a valid JSON array. Do not include markdown blocks.
-2. DO NOT use double quotes (") inside the reasoning text. Use single quotes (') instead.
-3. DO NOT use newlines inside the reasoning text.
-
-Return ONLY valid JSON array with {len(papers_batch)} objects:
+Return ONLY a valid JSON array with exactly {num_papers} objects in this format:
 [
   {{
     "paper_number": 1,
-    "reasoning": "<2-3 sentences of evaluation BEFORE scoring>",
-    "innovation": <0.0-10.0>,
-    "impact": <0.0-10.0>,
-    "methodology": <0.0-10.0>
+    "reasoning": "[Your comparative analysis for this paper, 2-3 sentences]",
+    "innovation": <score 0.0-10.0>,
+    "impact": <score 0.0-10.0>,
+    "methodology": <score 0.0-10.0>
   }}
 ]
 
+PAPERS TO EVALUATE:
 {papers_text}
 
 JSON array:""".strip()
@@ -479,6 +476,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
             
             print(f"  Batch {batch_start//BATCH_SIZE + 1}: Papers {batch_start+1}-{batch_end}...")
             
+            response_text = ""
             try:
                 prompt = build_comparative_batch_scoring_prompt(batch)
                 
@@ -487,7 +485,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
                     model_id,
                     prompt,
                     max_tokens=PHASE2_MAX_TOKENS,
-                    temperature=0.2,
+                    temperature=PHASE2_TEMPERATURE, # Now uses 0.5 to prevent identical scoring
                 )
                 
                 # Robust JSON array extraction using regex
@@ -526,6 +524,10 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
                 
             except Exception as e:
                 print(f"  Error scoring batch: {e}")
+                if response_text:
+                    # Print the raw text so we can see why the regex/JSON failed
+                    print(f"  [DEBUG] Raw output snippet: {repr(response_text[:400])}")
+                    
                 # Assign default scores to batch
                 for paper in batch:
                     paper.weighted_score = 0.0
@@ -605,6 +607,30 @@ def generate_summaries_for_winners(papers_by_topic: Dict[str, List[Paper]], mode
 
 
 # -------------------------
+# S3 Upload
+# -------------------------
+
+def upload_to_s3(file_path: Path, bucket: str, prefix: str):
+    """Upload the generated JSON file to an S3 bucket."""
+    if not bucket:
+        return
+        
+    s3_client = boto3.client('s3', region_name=AWS_REGION)
+    
+    # Construct S3 key (path inside the bucket)
+    s3_key = file_path.name
+    if prefix:
+        s3_key = f"{prefix.strip('/')}/{s3_key}"
+        
+    print(f"\nUploading to S3: s3://{bucket}/{s3_key}...")
+    try:
+        s3_client.upload_file(str(file_path), bucket, s3_key)
+        print("  ✓ Upload successful")
+    except Exception as e:
+        print(f"  ✗ Error uploading to S3: {e}")
+
+
+# -------------------------
 # Output
 # -------------------------
 
@@ -664,10 +690,14 @@ def main():
     # Create output
     output = create_weekly_output(winners, week_date)
     
-    # Save
+    # Save locally
     out_file = OUT_DIR / f"{week_date}.json"
     with open(out_file, 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
+        
+    # Upload to S3 if configured
+    if OUTPUT_BUCKET:
+        upload_to_s3(out_file, OUTPUT_BUCKET, OUTPUT_PREFIX)
     
     print("\n" + "="*60)
     print("PIPELINE COMPLETE!")
