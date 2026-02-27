@@ -12,6 +12,7 @@ import boto3
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field, ValidationError
 
 load_dotenv()
 
@@ -29,21 +30,21 @@ TOPIC_QUERIES = {
         "query": '''(ti:agent OR ti:agentic OR ti:"tool use" OR ti:planning OR 
                      ti:"multi-agent" OR abs:"autonomous agent" OR abs:"tool calling" OR 
                      abs:"action space")''',
-        "max_papers": 500
+        "max_papers": 200
     },
     "reinforcement_learning": {
         "name": "Reinforcement Learning",
         "query": '''(ti:"reinforcement learning" OR ti:RLHF OR ti:PPO OR ti:DPO OR 
                      ti:"policy optimization" OR abs:"reward model" OR abs:"Q-learning" OR
                      abs:"actor-critic")''',
-        "max_papers": 500
+        "max_papers": 200
     },
     "llms_applications": {
         "name": "LLMs & Applications",
         "query": '''(ti:LLM OR ti:"language model" OR ti:"fine-tuning" OR ti:RAG OR 
                      ti:"prompt engineering" OR abs:"retrieval augmented" OR 
                      abs:"instruction tuning" OR abs:"in-context learning")''',
-        "max_papers": 500
+        "max_papers": 200
     },
     "computer_vision": {
         "name": "Computer Vision",
@@ -51,13 +52,13 @@ TOPIC_QUERIES = {
                       ti:"object detection" OR abs:"convolutional" OR abs:"visual recognition")
                      AND NOT (ti:language OR ti:multimodal OR ti:"vision-language" OR 
                               abs:"vision-language" OR abs:"cross-modal"))''',
-        "max_papers": 500
+        "max_papers": 200
     },
     "multimodal": {
         "name": "Multimodal",
         "query": '''(ti:multimodal OR ti:"vision-language" OR ti:CLIP OR ti:"cross-modal" OR 
                      abs:"vision and language" OR abs:"audio-visual" OR abs:"video-language")''',
-        "max_papers": 500
+        "max_papers": 200
     }
 }
 
@@ -72,7 +73,7 @@ DAYS_LOOKBACK = int(os.getenv("ARXIV_DAYS_LOOKBACK", "7"))
 TOP_K_PER_TOPIC = int(os.getenv("TOP_K_PER_TOPIC", "5"))
 
 # Rate limiting
-ARXIV_DELAY_SEC = float(os.getenv("ARXIV_DELAY_SEC", "3"))
+ARXIV_DELAY_SEC = float(os.getenv("ARXIV_DELAY_SEC", "10")) 
 HTTP_TIMEOUT_SEC = int(os.getenv("HTTP_TIMEOUT_SEC", "60"))
 
 # Directories
@@ -85,16 +86,29 @@ OUT_DIR.mkdir(exist_ok=True)
 PHASE1_MAX_TOKENS = 400
 PHASE1_TEMPERATURE = 0.0
 
-PHASE2_MAX_TOKENS = 512
+# Massively increased tokens to prevent "Unterminated string" errors during batch JSON generation
+PHASE2_MAX_TOKENS = 2500 
 PHASE2_TEMPERATURE = 0.0
 
 PHASE3_MAX_TOKENS = 900
-PHASE3_TEMPERATURE = 0.6
-PHASE3_TOP_P = 0.95
+PHASE3_TEMPERATURE = 0.5
+PHASE3_TOP_P = 0.9
 
 # Regex helpers
 RE_LEADING_REASONING = re.compile(r"^\s*<reasoning>.*?</reasoning>\s*", re.DOTALL)
 RE_REFS_LINE = re.compile(r"^\s*(references|bibliography|works\s+cited)\b", re.IGNORECASE)
+
+
+# -------------------------
+# Pydantic Schemas
+# -------------------------
+
+class PaperEvaluation(BaseModel):
+    paper_number: int = Field(description="The sequential number of the paper in the batch.")
+    reasoning: str = Field(description="2-3 sentences evaluating the paper against the rubric before scoring.")
+    innovation: float = Field(ge=0.0, le=10.0, description="Score for challenging assumptions or introducing new approaches.")
+    impact: float = Field(ge=0.0, le=10.0, description="Score for performance improvements and real-world potential.")
+    methodology: float = Field(ge=0.0, le=10.0, description="Score for reproducibility and solid approach.")
 
 
 # -------------------------
@@ -132,7 +146,7 @@ class Paper:
 
 
 # -------------------------
-# Bedrock invocation
+# Bedrock invocation (Restored to boto3)
 # -------------------------
 
 def invoke_bedrock(
@@ -213,34 +227,64 @@ def invoke_bedrock(
 # Prompts
 # -------------------------
 
-def build_detailed_scoring_prompt(abstract: str, title: str) -> str:
-    """Phase 2: Detailed scoring using abstract only."""
-    return f"""You are evaluating a research paper for an AI/ML digest.
+def build_comparative_batch_scoring_prompt(papers_batch: List[Paper]) -> str:
+    """Score a batch of papers comparatively with calibration."""
+    papers_text = ""
+    for i, paper in enumerate(papers_batch, 1):
+        papers_text += f"\n{'='*60}\nPAPER {i}:\nTitle: {paper.title}\n\nAbstract:\n{paper.abstract}\n"
+    
+    # FIXED: Python 3.12 datetime warning resolved using timezone.utc
+    current_month_year = datetime.now(timezone.utc).strftime('%B %Y')
+    
+    return f"""You are evaluating research papers for an AI/ML digest.
 
-IMPORTANT: You are evaluating recently published research from {datetime.utcnow().strftime('%B %Y')}. Do not penalize papers for mentioning newer tools or models.
+IMPORTANT: You are evaluating recently published research from {current_month_year}. Do not penalize papers for mentioning newer tools or models.
 
-Score this paper on 3 criteria (each 0.0-10.0, use decimals):
+You will score {len(papers_batch)} papers on 3 criteria (each 0.0-10.0, use decimals):
 
 1. innovation (weight 50%): Does it challenge assumptions or introduce genuinely new approaches?
-
 2. impact (weight 30%): Performance improvements? Real-world application potential?
-
 3. methodology (weight 20%): Well-explained? Reproducible? Solid approach?
 
-Return ONLY valid JSON:
-{{
-  "innovation": <0.0-10.0>,
-  "impact": <0.0-10.0>,
-  "methodology": <0.0-10.0>,
-  "reasoning": "<2-3 sentences explaining scores>"
-}}
+<calibration>
+Use the FULL 0-10 scale. Here's what each range means:
 
-Title: {title}
+9.0-10.0: Groundbreaking work that will likely be cited for years (rare - maybe 1 in 100 papers)
+7.5-8.9: Strong contribution with clear novelty and solid execution (top 10-15% of papers)
+5.5-7.4: Decent work but incremental improvement or limited scope (typical good paper)
+3.0-5.4: Marginal contribution or significant methodological concerns
+0.0-2.9: Fundamentally flawed or trivial work (rare)
 
-Abstract:
-{abstract}
+Most papers should fall in the 4.0-8.5 range. Don't cluster everything around 8.0!
+</calibration>
 
-JSON:""".strip()
+<comparative_evaluation>
+Compare these {len(papers_batch)} papers to each other AND to typical arXiv submissions:
+- Which papers stand out as exceptional within this batch?
+- Which are solid but incremental?
+- Which have significant limitations?
+- Use the full score range - if all papers seem similar quality, you're not evaluating critically enough
+</comparative_evaluation>
+
+CRITICAL JSON RULES:
+1. Return ONLY a valid JSON array. Do not include markdown blocks.
+2. DO NOT use double quotes (") inside the reasoning text. Use single quotes (') instead.
+3. DO NOT use newlines inside the reasoning text.
+
+Return ONLY valid JSON array with {len(papers_batch)} objects:
+[
+  {{
+    "paper_number": 1,
+    "reasoning": "<2-3 sentences of evaluation BEFORE scoring>",
+    "innovation": <0.0-10.0>,
+    "impact": <0.0-10.0>,
+    "methodology": <0.0-10.0>
+  }}
+]
+
+{papers_text}
+
+JSON array:""".strip()
 
 
 def build_summary_prompt(full_text: str, title: str) -> str:
@@ -263,11 +307,10 @@ Readers keep up with research but don't read full papers. They understand ML fun
 
 <content_structure>
 Write 3-4 short paragraphs that flow naturally:
-- Open with a compelling hook (what's interesting or surprising?)
-- Explain the core approach and what changed versus typical methods
-- Include 1-2 concrete details (metrics, scale, dataset, or key results)
-- Close naturally by highlighting what makes this work significant (practical value, 
-  theoretical insight, or methodological advance - whichever fits best)
+1. Start with a compelling hook (what's interesting or surprising?)
+2. Explain the core approach and what changed versus typical methods
+3. Include 1-2 concrete details (metrics, scale, dataset, or key results)
+4. Close with practical implications (why should practitioners care?)
 </content_structure>
 
 <tone_guidelines>
@@ -356,7 +399,8 @@ def fetch_all_papers_by_topic() -> Dict[str, List[Paper]]:
     for topic_key in TOPIC_QUERIES.keys():
         papers = fetch_papers_for_topic(topic_key)
         papers_by_topic[topic_key] = papers
-        time.sleep(1)  # Polite delay between topic queries
+        print("  Waiting 5 seconds to respect arXiv rate limits...")
+        time.sleep(5)  # Polite delay between topic queries
     
     total = sum(len(papers) for papers in papers_by_topic.values())
     print(f"\n✓ Total papers fetched: {total}")
@@ -404,16 +448,19 @@ def download_and_extract_html(paper: Paper) -> str:
 
 
 # -------------------------
-# Phase 2: Detailed scoring (now Phase 1 in new flow)
+# Phase 2: Detailed scoring
 # -------------------------
 
 def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = TOP_K_PER_TOPIC, model_id: str = GPT_OSS_120B_MODEL_ID) -> Dict[str, List[Paper]]:
-    """Score papers in detail (innovation/impact/methodology) and pick top K per topic."""
-    print(f"\nDetailed scoring (top {top_k} per topic)...")
+    """Score papers in detail using comparative batch evaluation, then pick top K per topic."""
+    print(f"\nDetailed comparative scoring (batches of 10, top {top_k} per topic)...")
     print(f"Using model: {model_id}")
     
+    # Restored boto3 client
     bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
     scored_by_topic = {}
+    
+    BATCH_SIZE = 10
     
     for topic_key, topic_papers in papers_by_topic.items():
         topic_name = TOPIC_QUERIES[topic_key]["name"]
@@ -423,46 +470,73 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
             scored_by_topic[topic_key] = []
             continue
         
-        print(f"\n{topic_name}: Scoring {len(topic_papers)} papers...")
+        print(f"\n{topic_name}: Scoring {len(topic_papers)} papers in batches of {BATCH_SIZE}...")
         
-        for paper in topic_papers:
+        # Process papers in batches
+        for batch_start in range(0, len(topic_papers), BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, len(topic_papers))
+            batch = topic_papers[batch_start:batch_end]
+            
+            print(f"  Batch {batch_start//BATCH_SIZE + 1}: Papers {batch_start+1}-{batch_end}...")
+            
             try:
-                prompt = build_detailed_scoring_prompt(paper.abstract, paper.title)
+                prompt = build_comparative_batch_scoring_prompt(batch)
                 
                 response_text = invoke_bedrock(
                     bedrock,
                     model_id,
                     prompt,
                     max_tokens=PHASE2_MAX_TOKENS,
-                    temperature=PHASE2_TEMPERATURE,
+                    temperature=0.2,
                 )
                 
-                data = json.loads(response_text)
-                paper.innovation = float(data.get("innovation", 0))
-                paper.impact = float(data.get("impact", 0))
-                paper.methodology = float(data.get("methodology", 0))
-                paper.detailed_reasoning = data.get("reasoning", "")
+                # Robust JSON array extraction using regex
+                json_match = re.search(r'\[\s*\{.*\}\s*\]', response_text, re.DOTALL)
+                if not json_match:
+                    raise ValueError("Could not locate a valid JSON array in the response.")
                 
-                # Calculate weighted score
-                paper.weighted_score = (
-                    paper.innovation * 0.5 +
-                    paper.impact * 0.3 +
-                    paper.methodology * 0.2
-                )
+                clean_json_str = json_match.group(0)
+                raw_json = json.loads(clean_json_str)
                 
-                time.sleep(0.1)
+                # Hybrid Pydantic Validation
+                try:
+                    evaluations = [PaperEvaluation.model_validate(item) for item in raw_json]
+                except ValidationError as e:
+                    print(f"  Pydantic Validation Error: {e}")
+                    raise e
+                
+                # Assign scores to papers
+                for score_obj in evaluations:
+                    paper_idx = score_obj.paper_number - 1
+                    if 0 <= paper_idx < len(batch):
+                        paper = batch[paper_idx]
+                        paper.innovation = score_obj.innovation
+                        paper.impact = score_obj.impact
+                        paper.methodology = score_obj.methodology
+                        paper.detailed_reasoning = score_obj.reasoning
+                        
+                        # Calculate weighted score
+                        paper.weighted_score = (
+                            paper.innovation * 0.5 +
+                            paper.impact * 0.3 +
+                            paper.methodology * 0.2
+                        )
+                
+                time.sleep(0.2)
                 
             except Exception as e:
-                print(f"  Error: {e}")
-                paper.weighted_score = 0.0
+                print(f"  Error scoring batch: {e}")
+                # Assign default scores to batch
+                for paper in batch:
+                    paper.weighted_score = 0.0
         
         # Sort by weighted score and take top K
         topic_papers.sort(key=lambda p: p.weighted_score, reverse=True)
         top_papers = topic_papers[:top_k]
         
-        print(f"  Top {len(top_papers)} papers:")
+        print(f"\n  Top {len(top_papers)} papers:")
         for i, paper in enumerate(top_papers, 1):
-            print(f"    {i}. [{paper.weighted_score:.2f}] {paper.title[:60]}")
+            print(f"    {i}. [{paper.weighted_score:.2f}] (I:{paper.innovation:.1f} M:{paper.impact:.1f} Me:{paper.methodology:.1f}) {paper.title[:50]}")
         
         scored_by_topic[topic_key] = top_papers
     
@@ -471,7 +545,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
 
 
 # -------------------------
-# Phase 3: Generate summaries (now Phase 2 in new flow)
+# Phase 3: Generate summaries
 # -------------------------
 
 def generate_summaries_for_winners(papers_by_topic: Dict[str, List[Paper]], model_id: str = GPT_OSS_120B_MODEL_ID) -> Dict[str, Paper]:
@@ -479,6 +553,7 @@ def generate_summaries_for_winners(papers_by_topic: Dict[str, List[Paper]], mode
     print(f"\nGenerating summaries (1 per topic)...")
     print(f"Using model: {model_id}")
     
+    # Restored boto3 client
     bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
     winners = {}
     
@@ -537,7 +612,8 @@ def create_weekly_output(winners: Dict[str, Paper], week_date: str) -> dict:
     """Create final weekly JSON output."""
     output = {
         "week_date": week_date,
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        # FIXED: Python 3.12 datetime warning resolved using timezone.utc
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "model": GPT_OSS_120B_MODEL_ID,
         "topics": {}
     }
@@ -565,34 +641,6 @@ def create_weekly_output(winners: Dict[str, Paper], week_date: str) -> dict:
 
 
 # -------------------------
-# S3 upload helper
-# -------------------------
-
-def upload_output_file_to_s3(local_path: Path):
-    """Optionally push the JSON file to S3 if OUTPUT_BUCKET is configured."""
-    bucket = os.getenv("OUTPUT_BUCKET", "").strip()
-    if not bucket:
-        print("S3 upload disabled (OUTPUT_BUCKET not set)")
-        return
-    prefix = os.getenv("OUTPUT_PREFIX", "").strip()
-    # build key with optional prefix
-    if prefix:
-        # ensure no leading/trailing slashes on prefix
-        prefix = prefix.strip("/")
-        key = f"{prefix}/{local_path.name}"
-    else:
-        key = local_path.name
-
-    s3 = boto3.client("s3", region_name=AWS_REGION)
-    try:
-        print(f"Uploading {local_path} to s3://{bucket}/{key} ...")
-        s3.upload_file(str(local_path), bucket, key)
-        print(f"✓ Uploaded {local_path.name} to s3://{bucket}/{key}")
-    except Exception as e:
-        print(f"Error uploading to S3: {e}")
-
-
-# -------------------------
 # Main
 # -------------------------
 
@@ -601,7 +649,8 @@ def main():
     print("AI Research Digest - Topic Query Pipeline")
     print("="*60)
     
-    week_date = datetime.now().strftime("%Y-%m-%d")
+    # FIXED: Using timezone.utc to be safe
+    week_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
     # Fetch papers by topic using targeted queries
     papers_by_topic = fetch_all_papers_by_topic()
@@ -616,12 +665,9 @@ def main():
     output = create_weekly_output(winners, week_date)
     
     # Save
-    out_file = OUT_DIR / f"digest_{week_date}.json"
+    out_file = OUT_DIR / f"{week_date}.json"
     with open(out_file, 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
-
-    # optionally upload to S3 if configured
-    upload_output_file_to_s3(out_file)
     
     print("\n" + "="*60)
     print("PIPELINE COMPLETE!")
