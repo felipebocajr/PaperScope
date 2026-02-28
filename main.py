@@ -206,7 +206,7 @@ SCORING CRITERIA (0.0-10.0 scale):
 - Methodology: Well-explained? Reproducible? Solid technical approach?
 
 OUTPUT_FORMAT & CRITICAL RULES:
-1. DO NOT use double quotes (") inside the reasoning text. Use single quotes (') instead.
+1. DO NOT use double quotes (") inside the reasoning text. Use single quotepss (') instead.
 2. DO NOT use newlines inside the reasoning text.
 
 Return ONLY a valid JSON array with exactly {num_papers} objects in this format:

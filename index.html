@@ -3,8 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>AI Research Digest</title>
+  <title>Paper Rank — AI Research Digest</title>
   
+  <!-- Markdown & LaTeX Dependencies -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
   <style>
     :root {
       --bg-color: #0b0f19;
@@ -31,22 +37,45 @@
     a { color: var(--accent-color); text-decoration: none; transition: color 0.2s ease;}
     a:hover { color: var(--accent-hover); }
 
+    .top-bar {
+      text-align: right;
+      padding: 12px 20px 0;
+      max-width: 900px;
+      margin: 0 auto;
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .top-bar a {
+      color: var(--text-secondary);
+      text-decoration: underline;
+      text-decoration-color: rgba(156, 163, 175, 0.3);
+      text-underline-offset: 4px;
+      transition: all 0.2s ease;
+    }
+
+    .top-bar a:hover {
+      color: var(--text-primary);
+      text-decoration-color: var(--text-primary);
+    }
+
     .container {
       max-width: 900px;
       margin: 0 auto;
-      padding: 32px 20px;
+      padding: 24px 20px 32px;
     }
 
     .header {
-      margin-bottom: 32px;
+      margin-bottom: 8px; 
       text-align: center;
     }
 
     h1 { 
       margin: 0 0 8px 0; 
-      font-size: 32px; 
-      letter-spacing: -0.5px;
-      font-weight: 700;
+      font-size: 36px; 
+      letter-spacing: -1px;
+      font-weight: 800;
       background: linear-gradient(to right, #fff, #9ca3af);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
@@ -59,7 +88,7 @@
       border: 1px solid var(--card-border);
       border-radius: 16px;
       padding: 32px;
-      margin: 24px 0;
+      margin: 8px 0; 
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
       transition: opacity 0.3s ease;
     }
@@ -89,7 +118,7 @@
       letter-spacing: 0.5px;
     }
 
-    select {
+    select, input[type="email"], textarea {
       appearance: none;
       background-color: #1f2937;
       border: 1px solid #374151;
@@ -99,8 +128,12 @@
       outline: none;
       font-size: 15px;
       font-weight: 500;
-      cursor: pointer;
       transition: all 0.2s ease;
+      font-family: inherit;
+    }
+
+    select {
+      cursor: pointer;
       background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E");
       background-repeat: no-repeat;
       background-position: right 12px center;
@@ -108,11 +141,11 @@
       padding-right: 40px;
     }
 
-    select:hover:not(:disabled) { border-color: #4b5563; }
-    select:focus { border-color: var(--accent-color); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
-    select:disabled { opacity: .4; cursor: not-allowed; }
+    input[type="email"]:focus, textarea:focus, select:focus {
+      border-color: var(--accent-color);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    }
 
-    /* Modern Loader */
     .loader-container {
       display: flex;
       flex-direction: column;
@@ -133,6 +166,39 @@
     }
 
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    .welcome-container {
+      text-align: center;
+      padding: 60px 20px;
+    }
+
+    .welcome-icon {
+      font-size: 48px;
+      margin-bottom: 24px;
+      animation: float 3s ease-in-out infinite;
+      display: inline-block;
+    }
+
+    @keyframes float {
+      0% { transform: translateY(0px); }
+      50% { transform: translateY(-10px); }
+      100% { transform: translateY(0px); }
+    }
+
+    .welcome-title {
+      font-size: 28px;
+      margin: 0 0 12px 0;
+      color: var(--text-primary);
+      font-weight: 700;
+    }
+
+    .welcome-text {
+      font-size: 16px;
+      color: var(--text-secondary);
+      max-width: 480px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
 
     .paper-title {
       margin: 0 0 20px;
@@ -161,10 +227,22 @@
     }
 
     .summary {
-      margin: 0;
-      line-height: 1.75;
       font-size: 16px;
       color: #d1d5db;
+      line-height: 1.6;
+    }
+
+    /* Markdown Paragraph Spacing */
+    .summary p {
+      margin: 0 0 12px 0;
+    }
+
+    .summary p:last-child {
+      margin-bottom: 0;
+    }
+    
+    .summary strong {
+      color: #fff;
     }
 
     .authors {
@@ -190,17 +268,9 @@
     
     .read-more-btn:hover {
       background: #fff;
-      text-decoration: none;
       transform: translateY(-2px);
     }
 
-    .footer {
-      margin-top: 32px;
-      padding-bottom: 40px;
-      font-size: 13px;
-      text-align: center;
-    }
-    
     .scores-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -238,16 +308,71 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
+
+    .feedback-box {
+      margin-top: 32px;
+    }
+
+    .feedback-box h3 {
+      margin: 0 0 8px 0;
+      font-size: 20px;
+      text-align: center;
+    }
+
+    .feedback-form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .submit-btn {
+      background: var(--accent-color);
+      color: #fff;
+      border: none;
+      padding: 14px 28px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 15px;
+      cursor: pointer;
+      transition: background 0.2s ease;
+      width: 100%;
+      max-width: 200px;
+      margin: 0 auto;
+    }
+
+    .submit-btn:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+
+    .submit-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .footer {
+      margin-top: 32px;
+      padding-bottom: 40px;
+      font-size: 13px;
+      text-align: center;
+      border-top: 1px solid var(--card-border);
+      padding-top: 24px;
+    }
   </style>
 </head>
 <body>
+  
+  <div class="top-bar">
+    Developed by <a href="https://www.linkedin.com/in/felipe-bochini/" target="_blank" rel="noopener noreferrer">Felipe Bochini</a>
+  </div>
+
   <header class="container header">
-    <h1>AI Research Digest</h1>
-    <p class="muted">Curated top papers from arXiv, scored and summarized by AI.</p>
+    <h1>Paper Rank</h1>
+    <p class="muted">The best AI papers from arXiv, selected and ranked by Artificial Intelligence.</p>
   </header>
 
   <main class="container">
-    <section class="controls card" style="padding: 24px;">
+    <section class="controls card">
       <div class="control">
         <label for="weekSelect">Timeline</label>
         <select id="weekSelect" disabled></select>
@@ -260,11 +385,26 @@
     </section>
 
     <section id="paper" class="card paper">
-      <!-- Content dynamically injected here -->
+      <div class="loader-container">
+        <div class="spinner"></div>
+        <div>Initializing Paper Rank...</div>
+      </div>
+    </section>
+
+    <section class="feedback-box card">
+      <h3>Share Your Feedback</h3>
+      <p class="muted" style="font-size: 14px; margin-top: 0; text-align: center;">Help us improve Paper Rank. Insert your email (optional) if you'd like a reply.</p>
+      
+      <div class="feedback-form">
+        <input type="email" id="feedbackEmail" placeholder="Email (optional)" aria-label="Email Address">
+        <textarea id="feedbackMessage" rows="3" placeholder="Tell us what you think..." aria-label="Feedback Message"></textarea>
+        <button id="submitBtn" onclick="sendFeedback()" class="submit-btn">Send Feedback</button>
+        <p id="formStatus" style="font-size: 12px; margin-top: 4px; display: none; text-align: center;"></p>
+      </div>
     </section>
 
     <footer class="footer muted">
-      <span id="footerMeta"></span>
+      <div id="footerMeta"></div>
     </footer>
   </main>
 
@@ -279,22 +419,73 @@
     let weeksList = [];
     let currentWeekData = null;
 
-    // --- Modern Loading States ---
+    // Configure marked to handle line breaks like Github
+    marked.setOptions({
+      breaks: true,
+      gfm: true
+    });
+
+    async function sendFeedback() {
+      const email = document.getElementById("feedbackEmail").value;
+      const msg = document.getElementById("feedbackMessage").value;
+      const btn = document.getElementById("submitBtn");
+      const status = document.getElementById("formStatus");
+
+      if (!msg.trim()) {
+        alert("Please enter a message before sending.");
+        return;
+      }
+
+      const FORMSPREE_ID = 'mkovedzd';
+
+      btn.disabled = true;
+      btn.innerText = "Sending...";
+      status.style.display = "block";
+      status.innerText = "Processing your feedback...";
+
+      try {
+        const response = await fetch(`https://formspree.io/f/${FORMSPREE_ID}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            email: email, 
+            message: msg, 
+            topic: els.topic.value, 
+            week: els.week.value 
+          })
+        });
+
+        if (response.ok) {
+          status.innerText = "✓ Thank you! Your feedback has been sent.";
+          status.style.color = "#10b981";
+          document.getElementById("feedbackMessage").value = "";
+          document.getElementById("feedbackEmail").value = "";
+          btn.innerText = "Sent!";
+        } else {
+          throw new Error();
+        }
+      } catch (err) {
+        status.innerText = "✗ Failed to send. Please email bochinifelipe@gmail.com directly.";
+        status.style.color = "#ef4444";
+        btn.disabled = false;
+        btn.innerText = "Try Again";
+      }
+    }
+
     function showLoader(message = "Loading...") {
-      els.paper.innerHTML = `
-        <div class="loader-container">
-          <div class="spinner"></div>
-          <div>${message}</div>
-        </div>
-      `;
+      els.paper.innerHTML = `<div class="loader-container"><div class="spinner"></div><div>${message}</div></div>`;
     }
 
     function showError(message) {
+      els.paper.innerHTML = `<div class="loader-container" style="color: #ef4444;"><div style="font-weight: 600;">Unable to display ranking</div><div style="font-size: 14px; margin-top: 4px; color: var(--text-secondary); text-align: center;">${message}</div></div>`;
+    }
+
+    function renderWelcome() {
       els.paper.innerHTML = `
-        <div class="loader-container" style="color: #ef4444;">
-          <svg style="width: 48px; height: 48px; margin-bottom: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-          <div style="font-weight: 600;">Something went wrong</div>
-          <div style="font-size: 14px; margin-top: 4px; color: var(--text-secondary); text-align: center;">${message}</div>
+        <div class="welcome-container">
+          <div class="welcome-icon">✨</div>
+          <h2 class="welcome-title">Explore AI Research</h2>
+          <p class="welcome-text">Select a timeline and a research topic above to dive into the most innovative and impactful papers of the week, curated and scored by our AI.</p>
         </div>
       `;
     }
@@ -308,201 +499,142 @@
     function setOptions(selectEl, items, { placeholder }) {
       selectEl.innerHTML = "";
       const ph = document.createElement("option");
-      ph.value = "";
-      ph.textContent = placeholder || "Select…";
-      ph.disabled = true;
+      ph.value = ""; ph.textContent = placeholder || "Select..."; ph.disabled = true;
       selectEl.appendChild(ph);
-
       for (const it of items) {
         const opt = document.createElement("option");
-        opt.value = it.value;
-        opt.textContent = it.label;
+        opt.value = it.value; opt.textContent = it.label;
         selectEl.appendChild(opt);
       }
     }
 
     function escapeHtml(s) {
-      return String(s || "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+      return String(s || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
     }
 
     function renderPaper() {
       if (!currentWeekData) return;
-
+      
       const topicKey = els.topic.value;
+      if (!topicKey) {
+        renderWelcome();
+        return;
+      }
+
       const topics = currentWeekData.topics || {};
       const topic = topics[topicKey];
 
       if (!topic || !topic.paper) {
-        els.paper.innerHTML = `
-          <div class="loader-container">
-            <div style="font-size: 40px; margin-bottom: 16px;">📭</div>
-            <div style="font-weight: 500;">No paper found</div>
-            <div style="font-size: 14px; color: var(--text-secondary);">There is no paper available for this topic in the selected week.</div>
-          </div>
-        `;
+        els.paper.innerHTML = `<div class="loader-container"><div style="font-size: 40px; margin-bottom: 16px;">📭</div><div style="font-weight: 500;">No paper found</div></div>`;
         return;
       }
 
       const p = topic.paper;
       const topicName = topic.topic_name || topicKey;
       const authors = Array.isArray(p.authors) ? p.authors : [];
-      const summaryHtml = escapeHtml(p.summary || "").replace(/\n\n+/g, "\n\n").replace(/\n/g, "<br><br>");
       
+      // Use Marked.js to parse the Markdown summary
+      const summaryHtml = p.summary ? marked.parse(p.summary) : "<span class='muted'>(Empty summary)</span>";
       const scores = p.scores || {};
 
       els.paper.innerHTML = `
         <div class="paper-meta">
           <span class="badge">📚 ${escapeHtml(topicName)}</span>
-          <span class="badge">📅 ${escapeHtml(currentWeekData.week_date || "")}</span>
           ${p.published ? `<span class="badge">📝 Published: ${escapeHtml(p.published)}</span>` : ""}
         </div>
-
-        <h2 class="paper-title">
-          <a href="${escapeHtml(p.arxiv_url)}" target="_blank" rel="noopener noreferrer">
-            ${escapeHtml(p.title)}
-          </a>
-        </h2>
-
-        <p class="summary">${summaryHtml || "<span class='muted'>(Empty summary)</span>"}</p>
+        <h2 class="paper-title"><a href="${escapeHtml(p.arxiv_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(p.title)}</a></h2>
+        
+        <div id="paperSummary" class="summary">${summaryHtml}</div>
         
         ${scores.weighted ? `
         <div class="scores-grid">
-          <div class="score-item">
-            <span class="score-value">${scores.weighted.toFixed(1)}</span>
-            <span class="score-label">Overall Match</span>
-          </div>
-          <div class="score-item">
-            <span class="score-value">${scores.innovation ? scores.innovation.toFixed(1) : '-'}</span>
-            <span class="score-label">Innovation</span>
-          </div>
-          <div class="score-item">
-            <span class="score-value">${scores.impact ? scores.impact.toFixed(1) : '-'}</span>
-            <span class="score-label">Impact</span>
-          </div>
-          <div class="score-item">
-            <span class="score-value">${scores.methodology ? scores.methodology.toFixed(1) : '-'}</span>
-            <span class="score-label">Methodology</span>
-          </div>
-        </div>
-        ` : ''}
-
-        <div class="authors">
-          <strong>Authors:</strong> ${escapeHtml(authors.join(", ") || "Unknown")}
-          <div style="margin-top:20px;">
-            <a href="${escapeHtml(p.arxiv_url)}" class="read-more-btn" target="_blank" rel="noopener noreferrer">
-              Read Full Paper on arXiv
-            </a>
-          </div>
+          <div class="score-item"><span class="score-value">${scores.weighted.toFixed(1)}</span><span class="score-label">Global Rank</span></div>
+          <div class="score-item"><span class="score-value">${scores.innovation ? scores.innovation.toFixed(1) : '-'}</span><span class="score-label">Innovation</span></div>
+          <div class="score-item"><span class="score-value">${scores.impact ? scores.impact.toFixed(1) : '-'}</span><span class="score-label">Impact</span></div>
+          <div class="score-item"><span class="score-value">${scores.methodology ? scores.methodology.toFixed(1) : '-'}</span><span class="score-label">Methodology</span></div>
+        </div>` : ''}
+        
+        <div class="authors"><strong>Authors:</strong> ${escapeHtml(authors.join(", ") || "Unknown")}
+          <div style="margin-top:20px;"><a href="${escapeHtml(p.arxiv_url)}" class="read-more-btn" target="_blank" rel="noopener noreferrer">Read Full Paper on arXiv</a></div>
         </div>
       `;
 
-      // Update Footer
+      // Render LaTeX equations in the newly created summary element
+      const summaryEl = document.getElementById("paperSummary");
+      renderMathInElement(summaryEl, {
+        delimiters: [
+          {left: '$$', right: '$$', display: true},
+          {left: '$', right: '$', display: false},
+          {left: '\\(', right: '\\)', display: false},
+          {left: '\\[', right: '\\]', display: true}
+        ],
+        throwOnError : false
+      });
+
       const meta = [];
-      if (currentWeekData.generated_at) {
-          const date = new Date(currentWeekData.generated_at);
-          meta.push(`Generated: ${date.toLocaleDateString()}`);
-      }
+      if (currentWeekData.generated_at) meta.push(`Generated on: ${new Date(currentWeekData.generated_at).toLocaleDateString()}`);
       if (currentWeekData.model) meta.push(`AI Model: ${currentWeekData.model}`);
       els.footerMeta.textContent = meta.join(" • ");
     }
 
-    function readStateFromUrl() {
-      const u = new URL(window.location.href);
-      return {
-        topic: u.searchParams.get("topic") || "",
-        week: u.searchParams.get("week") || "",
-      };
-    }
-
-    function writeStateToUrl({ topic, week }) {
-      const u = new URL(window.location.href);
-      if (topic) u.searchParams.set("topic", topic); else u.searchParams.delete("topic");
-      if (week) u.searchParams.set("week", week); else u.searchParams.delete("week");
-      history.replaceState(null, "", u.toString());
-    }
-
-    // Load data for a specific week
     async function loadWeekData(weekDate, targetTopic) {
       try {
-        showLoader(`Fetching digest for ${weekDate}...`);
+        showLoader(`Fetching ranking for ${weekDate}...`);
         els.topic.disabled = true;
-        
         currentWeekData = await fetchJson(`weeks/${weekDate}.json`);
-        
         const topicsObj = currentWeekData.topics || {};
-        const topicItems = Object.keys(topicsObj).map(k => ({
-          value: k,
-          label: topicsObj[k]?.topic_name || k,
-        }));
-
-        if (topicItems.length === 0) {
-          els.topic.innerHTML = "<option>No topics</option>";
-          showError("The selected week has an empty topics list.");
-          return;
-        }
-
-        setOptions(els.topic, topicItems, { placeholder: "Select a topic…" });
+        const topicItems = Object.keys(topicsObj).map(k => ({ value: k, label: topicsObj[k]?.topic_name || k }));
+        
+        setOptions(els.topic, topicItems, { placeholder: "Select research topic..." });
         els.topic.disabled = false;
-
+        
         if (targetTopic && topicItems.some(t => t.value === targetTopic)) {
           els.topic.value = targetTopic;
+          renderPaper();
         } else {
-          els.topic.value = topicItems[0].value;
+          els.topic.value = "";
+          renderWelcome();
         }
 
-        writeStateToUrl({ week: weekDate, topic: els.topic.value });
-        renderPaper();
+        const u = new URL(window.location.href);
+        u.searchParams.set("week", weekDate);
+        if (els.topic.value) {
+           u.searchParams.set("topic", els.topic.value);
+        } else {
+           u.searchParams.delete("topic");
+        }
+        history.replaceState(null, "", u.toString());
 
-      } catch (e) {
-        showError(`Failed to load data for week ${weekDate}. Check your network or bucket configuration.`);
-      }
+      } catch (e) { showError("The research digest is temporarily unavailable."); }
     }
 
-    // Main initialization
     async function main() {
       try {
-        showLoader("Initializing index...");
+        showLoader("Synchronizing...");
         weeksList = await fetchJson("weeks.json"); 
+        if (!Array.isArray(weeksList) || weeksList.length === 0) { showError("No research data found."); return; }
         
-        if (!Array.isArray(weeksList) || weeksList.length === 0) {
-          showError("No data available yet. Please run your Python pipeline to generate the first digest.");
-          return;
-        }
-
-        setOptions(
-          els.week,
-          weeksList.map(w => ({ value: w, label: w })),
-          { placeholder: "Select a week…" }
-        );
+        setOptions(els.week, weeksList.map(w => ({ value: w, label: w })), { placeholder: "Select week..." });
         els.week.disabled = false;
-
-        const state = readStateFromUrl();
-        const targetWeek = (state.week && weeksList.includes(state.week)) ? state.week : weeksList[0];
+        
+        const u = new URL(window.location.href);
+        const targetWeek = (u.searchParams.get("week") && weeksList.includes(u.searchParams.get("week"))) ? u.searchParams.get("week") : weeksList[0];
         els.week.value = targetWeek;
-
-        await loadWeekData(targetWeek, state.topic);
-
-        els.week.addEventListener("change", async () => {
-          await loadWeekData(els.week.value, els.topic.value);
-        });
-
+        
+        await loadWeekData(targetWeek, u.searchParams.get("topic"));
+        
+        els.week.addEventListener("change", () => loadWeekData(els.week.value, els.topic.value));
+        
         els.topic.addEventListener("change", () => {
-          writeStateToUrl({ week: els.week.value, topic: els.topic.value });
+          const newUrl = new URL(window.location.href);
+          newUrl.searchParams.set("week", els.week.value);
+          newUrl.searchParams.set("topic", els.topic.value);
+          history.replaceState(null, "", newUrl.toString());
           renderPaper();
         });
-
-      } catch (e) {
-        console.error(e);
-        showError("Failed to connect to the AWS S3 Bucket. Please ensure the bucket is public and CORS is configured properly.");
-      }
+      } catch (e) { showError("Failed to connect to the Paper Rank service."); }
     }
-
-    // Start application
+    
     main();
   </script>
 </body>
