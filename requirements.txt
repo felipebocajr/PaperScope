@@ -3,6 +3,7 @@ arxiv>=2.1.0
 boto3>=1.34.0
 requests>=2.31.0
 python-dotenv>=1.0.0
+pydantic>=2.6.0
 
 # HTML parsing
 beautifulsoup4>=4.12.0

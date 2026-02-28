@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>AI Research Digest</title>
+  
+  <style>
+    :root {
+      --bg-color: #0b0f19;
+      --card-bg: #111827;
+      --card-border: #1f2937;
+      --text-primary: #f3f4f6;
+      --text-secondary: #9ca3af;
+      --accent-color: #3b82f6;
+      --accent-hover: #60a5fa;
+      --accent-bg: rgba(59, 130, 246, 0.1);
+      
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color-scheme: dark;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg-color);
+      color: var(--text-primary);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent-color); text-decoration: none; transition: color 0.2s ease;}
+    a:hover { color: var(--accent-hover); }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px 20px;
+    }
+
+    .header {
+      margin-bottom: 32px;
+      text-align: center;
+    }
+
+    h1 { 
+      margin: 0 0 8px 0; 
+      font-size: 32px; 
+      letter-spacing: -0.5px;
+      font-weight: 700;
+      background: linear-gradient(to right, #fff, #9ca3af);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    
+    .muted { color: var(--text-secondary); }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 32px;
+      margin: 24px 0;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      transition: opacity 0.3s ease;
+    }
+
+    .controls {
+      display: flex;
+      gap: 20px;
+      padding: 20px 32px;
+    }
+
+    @media (max-width: 600px) {
+      .controls { flex-direction: column; gap: 16px; }
+    }
+
+    .control {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+    }
+
+    label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    select {
+      appearance: none;
+      background-color: #1f2937;
+      border: 1px solid #374151;
+      color: #f3f4f6;
+      padding: 14px 16px;
+      border-radius: 12px;
+      outline: none;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 16px;
+      padding-right: 40px;
+    }
+
+    select:hover:not(:disabled) { border-color: #4b5563; }
+    select:focus { border-color: var(--accent-color); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
+    select:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* Modern Loader */
+    .loader-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 0;
+      color: var(--text-secondary);
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid #1f2937;
+      border-top-color: var(--accent-color);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    .paper-title {
+      margin: 0 0 20px;
+      font-size: 24px;
+      line-height: 1.4;
+      font-weight: 700;
+    }
+
+    .paper-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 14px;
+      border-radius: 8px;
+      background: #1f2937;
+      border: 1px solid #374151;
+      font-size: 13px;
+      font-weight: 500;
+      color: #d1d5db;
+    }
+
+    .summary {
+      margin: 0;
+      line-height: 1.75;
+      font-size: 16px;
+      color: #d1d5db;
+    }
+
+    .authors {
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid var(--card-border);
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    .read-more-btn {
+      display: inline-flex;
+      align-items: center;
+      margin-top: 16px;
+      padding: 10px 20px;
+      background: var(--text-primary);
+      color: #000;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      transition: transform 0.2s ease, background 0.2s ease;
+    }
+    
+    .read-more-btn:hover {
+      background: #fff;
+      text-decoration: none;
+      transform: translateY(-2px);
+    }
+
+    .footer {
+      margin-top: 32px;
+      padding-bottom: 40px;
+      font-size: 13px;
+      text-align: center;
+    }
+    
+    .scores-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+      background: var(--accent-bg);
+      padding: 24px;
+      border-radius: 12px;
+      border: 1px solid rgba(59, 130, 246, 0.2);
+    }
+    
+    .score-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    
+    .score-value {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--text-primary);
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .score-item:first-child .score-value {
+      color: var(--accent-hover);
+    }
+    
+    .score-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent-hover);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+  </style>
+</head>
+<body>
+  <header class="container header">
+    <h1>AI Research Digest</h1>
+    <p class="muted">Curated top papers from arXiv, scored and summarized by AI.</p>
+  </header>
+
+  <main class="container">
+    <section class="controls card" style="padding: 24px;">
+      <div class="control">
+        <label for="weekSelect">Timeline</label>
+        <select id="weekSelect" disabled></select>
+      </div>
+
+      <div class="control">
+        <label for="topicSelect">Research Topic</label>
+        <select id="topicSelect" disabled></select>
+      </div>
+    </section>
+
+    <section id="paper" class="card paper">
+      <!-- Content dynamically injected here -->
+    </section>
+
+    <footer class="footer muted">
+      <span id="footerMeta"></span>
+    </footer>
+  </main>
+
+  <script>
+    const els = {
+      topic: document.getElementById("topicSelect"),
+      week: document.getElementById("weekSelect"),
+      paper: document.getElementById("paper"),
+      footerMeta: document.getElementById("footerMeta"),
+    };
+
+    let weeksList = [];
+    let currentWeekData = null;
+
+    // --- Modern Loading States ---
+    function showLoader(message = "Loading...") {
+      els.paper.innerHTML = `
+        <div class="loader-container">
+          <div class="spinner"></div>
+          <div>${message}</div>
+        </div>
+      `;
+    }
+
+    function showError(message) {
+      els.paper.innerHTML = `
+        <div class="loader-container" style="color: #ef4444;">
+          <svg style="width: 48px; height: 48px; margin-bottom: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          <div style="font-weight: 600;">Something went wrong</div>
+          <div style="font-size: 14px; margin-top: 4px; color: var(--text-secondary); text-align: center;">${message}</div>
+        </div>
+      `;
+    }
+
+    async function fetchJson(path) {
+      const res = await fetch(path, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    function setOptions(selectEl, items, { placeholder }) {
+      selectEl.innerHTML = "";
+      const ph = document.createElement("option");
+      ph.value = "";
+      ph.textContent = placeholder || "Select…";
+      ph.disabled = true;
+      selectEl.appendChild(ph);
+
+      for (const it of items) {
+        const opt = document.createElement("option");
+        opt.value = it.value;
+        opt.textContent = it.label;
+        selectEl.appendChild(opt);
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function renderPaper() {
+      if (!currentWeekData) return;
+
+      const topicKey = els.topic.value;
+      const topics = currentWeekData.topics || {};
+      const topic = topics[topicKey];
+
+      if (!topic || !topic.paper) {
+        els.paper.innerHTML = `
+          <div class="loader-container">
+            <div style="font-size: 40px; margin-bottom: 16px;">📭</div>
+            <div style="font-weight: 500;">No paper found</div>
+            <div style="font-size: 14px; color: var(--text-secondary);">There is no paper available for this topic in the selected week.</div>
+          </div>
+        `;
+        return;
+      }
+
+      const p = topic.paper;
+      const topicName = topic.topic_name || topicKey;
+      const authors = Array.isArray(p.authors) ? p.authors : [];
+      const summaryHtml = escapeHtml(p.summary || "").replace(/\n\n+/g, "\n\n").replace(/\n/g, "<br><br>");
+      
+      const scores = p.scores || {};
+
+      els.paper.innerHTML = `
+        <div class="paper-meta">
+          <span class="badge">📚 ${escapeHtml(topicName)}</span>
+          <span class="badge">📅 ${escapeHtml(currentWeekData.week_date || "")}</span>
+          ${p.published ? `<span class="badge">📝 Published: ${escapeHtml(p.published)}</span>` : ""}
+        </div>
+
+        <h2 class="paper-title">
+          <a href="${escapeHtml(p.arxiv_url)}" target="_blank" rel="noopener noreferrer">
+            ${escapeHtml(p.title)}
+          </a>
+        </h2>
+
+        <p class="summary">${summaryHtml || "<span class='muted'>(Empty summary)</span>"}</p>
+        
+        ${scores.weighted ? `
+        <div class="scores-grid">
+          <div class="score-item">
+            <span class="score-value">${scores.weighted.toFixed(1)}</span>
+            <span class="score-label">Overall Match</span>
+          </div>
+          <div class="score-item">
+            <span class="score-value">${scores.innovation ? scores.innovation.toFixed(1) : '-'}</span>
+            <span class="score-label">Innovation</span>
+          </div>
+          <div class="score-item">
+            <span class="score-value">${scores.impact ? scores.impact.toFixed(1) : '-'}</span>
+            <span class="score-label">Impact</span>
+          </div>
+          <div class="score-item">
+            <span class="score-value">${scores.methodology ? scores.methodology.toFixed(1) : '-'}</span>
+            <span class="score-label">Methodology</span>
+          </div>
+        </div>
+        ` : ''}
+
+        <div class="authors">
+          <strong>Authors:</strong> ${escapeHtml(authors.join(", ") || "Unknown")}
+          <div style="margin-top:20px;">
+            <a href="${escapeHtml(p.arxiv_url)}" class="read-more-btn" target="_blank" rel="noopener noreferrer">
+              Read Full Paper on arXiv
+            </a>
+          </div>
+        </div>
+      `;
+
+      // Update Footer
+      const meta = [];
+      if (currentWeekData.generated_at) {
+          const date = new Date(currentWeekData.generated_at);
+          meta.push(`Generated: ${date.toLocaleDateString()}`);
+      }
+      if (currentWeekData.model) meta.push(`AI Model: ${currentWeekData.model}`);
+      els.footerMeta.textContent = meta.join(" • ");
+    }
+
+    function readStateFromUrl() {
+      const u = new URL(window.location.href);
+      return {
+        topic: u.searchParams.get("topic") || "",
+        week: u.searchParams.get("week") || "",
+      };
+    }
+
+    function writeStateToUrl({ topic, week }) {
+      const u = new URL(window.location.href);
+      if (topic) u.searchParams.set("topic", topic); else u.searchParams.delete("topic");
+      if (week) u.searchParams.set("week", week); else u.searchParams.delete("week");
+      history.replaceState(null, "", u.toString());
+    }
+
+    // Load data for a specific week
+    async function loadWeekData(weekDate, targetTopic) {
+      try {
+        showLoader(`Fetching digest for ${weekDate}...`);
+        els.topic.disabled = true;
+        
+        currentWeekData = await fetchJson(`weeks/${weekDate}.json`);
+        
+        const topicsObj = currentWeekData.topics || {};
+        const topicItems = Object.keys(topicsObj).map(k => ({
+          value: k,
+          label: topicsObj[k]?.topic_name || k,
+        }));
+
+        if (topicItems.length === 0) {
+          els.topic.innerHTML = "<option>No topics</option>";
+          showError("The selected week has an empty topics list.");
+          return;
+        }
+
+        setOptions(els.topic, topicItems, { placeholder: "Select a topic…" });
+        els.topic.disabled = false;
+
+        if (targetTopic && topicItems.some(t => t.value === targetTopic)) {
+          els.topic.value = targetTopic;
+        } else {
+          els.topic.value = topicItems[0].value;
+        }
+
+        writeStateToUrl({ week: weekDate, topic: els.topic.value });
+        renderPaper();
+
+      } catch (e) {
+        showError(`Failed to load data for week ${weekDate}. Check your network or bucket configuration.`);
+      }
+    }
+
+    // Main initialization
+    async function main() {
+      try {
+        showLoader("Initializing index...");
+        weeksList = await fetchJson("weeks.json"); 
+        
+        if (!Array.isArray(weeksList) || weeksList.length === 0) {
+          showError("No data available yet. Please run your Python pipeline to generate the first digest.");
+          return;
+        }
+
+        setOptions(
+          els.week,
+          weeksList.map(w => ({ value: w, label: w })),
+          { placeholder: "Select a week…" }
+        );
+        els.week.disabled = false;
+
+        const state = readStateFromUrl();
+        const targetWeek = (state.week && weeksList.includes(state.week)) ? state.week : weeksList[0];
+        els.week.value = targetWeek;
+
+        await loadWeekData(targetWeek, state.topic);
+
+        els.week.addEventListener("change", async () => {
+          await loadWeekData(els.week.value, els.topic.value);
+        });
+
+        els.topic.addEventListener("change", () => {
+          writeStateToUrl({ week: els.week.value, topic: els.topic.value });
+          renderPaper();
+        });
+
+      } catch (e) {
+        console.error(e);
+        showError("Failed to connect to the AWS S3 Bucket. Please ensure the bucket is public and CORS is configured properly.");
+      }
+    }
+
+    // Start application
+    main();
+  </script>
+</body>
+</html>

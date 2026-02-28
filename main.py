@@ -34,21 +34,21 @@ TOPIC_QUERIES = {
         "query": '''(ti:agent OR ti:agentic OR ti:"tool use" OR ti:planning OR 
                      ti:"multi-agent" OR abs:"autonomous agent" OR abs:"tool calling" OR 
                      abs:"action space")''',
-        "max_papers": 200
+        "max_papers": 1000
     },
     "reinforcement_learning": {
         "name": "Reinforcement Learning",
         "query": '''(ti:"reinforcement learning" OR ti:RLHF OR ti:PPO OR ti:DPO OR 
                      ti:"policy optimization" OR abs:"reward model" OR abs:"Q-learning" OR
                      abs:"actor-critic")''',
-        "max_papers": 200
+        "max_papers": 1000
     },
     "llms_applications": {
         "name": "LLMs & Applications",
         "query": '''(ti:LLM OR ti:"language model" OR ti:"fine-tuning" OR ti:RAG OR 
                      ti:"prompt engineering" OR abs:"retrieval augmented" OR 
                      abs:"instruction tuning" OR abs:"in-context learning")''',
-        "max_papers": 200
+        "max_papers": 1000
     },
     "computer_vision": {
         "name": "Computer Vision",
@@ -56,13 +56,13 @@ TOPIC_QUERIES = {
                       ti:"object detection" OR abs:"convolutional" OR abs:"visual recognition")
                      AND NOT (ti:language OR ti:multimodal OR ti:"vision-language" OR 
                               abs:"vision-language" OR abs:"cross-modal"))''',
-        "max_papers": 200
+        "max_papers": 1000
     },
     "multimodal": {
         "name": "Multimodal",
         "query": '''(ti:multimodal OR ti:"vision-language" OR ti:CLIP OR ti:"cross-modal" OR 
                      abs:"vision and language" OR abs:"audio-visual" OR abs:"video-language")''',
-        "max_papers": 200
+        "max_papers": 1000
     }
 }
 
@@ -71,13 +71,13 @@ TOPICS = {k: v["name"] for k, v in TOPIC_QUERIES.items()}
 TOPIC_DISPLAY_NAMES = TOPICS
 
 # Pipeline configuration
-ARXIV_QUERY = os.getenv("ARXIV_QUERY", "cat:cs.AI")
+ARXIV_QUERY = os.getenv("ARXIV_QUERY", "(cat:cs.AI OR cat:cs.LG OR cat:cs.CV OR cat:cs.CL)")
 MAX_RESULTS = int(os.getenv("ARXIV_MAX_RESULTS", "1000"))
 DAYS_LOOKBACK = int(os.getenv("ARXIV_DAYS_LOOKBACK", "7"))
 TOP_K_PER_TOPIC = int(os.getenv("TOP_K_PER_TOPIC", "5"))
 
 # Rate limiting
-ARXIV_DELAY_SEC = float(os.getenv("ARXIV_DELAY_SEC", "10")) 
+ARXIV_DELAY_SEC = 7
 HTTP_TIMEOUT_SEC = int(os.getenv("HTTP_TIMEOUT_SEC", "60"))
 
 # Directories
@@ -90,9 +90,8 @@ OUT_DIR.mkdir(exist_ok=True)
 PHASE1_MAX_TOKENS = 400
 PHASE1_TEMPERATURE = 0.0
 
-# Massively increased tokens to prevent "Unterminated string" errors during batch JSON generation
 PHASE2_MAX_TOKENS = 2500 
-PHASE2_TEMPERATURE = 0.5  # Increased to prevent identical scoring (mode collapse)
+PHASE2_TEMPERATURE = 0.5 
 
 PHASE3_MAX_TOKENS = 900
 PHASE3_TEMPERATURE = 0.5
@@ -150,7 +149,7 @@ class Paper:
 
 
 # -------------------------
-# Bedrock invocation (Restored to boto3)
+# Bedrock invocation
 # -------------------------
 
 def invoke_bedrock(
@@ -170,7 +169,7 @@ def invoke_bedrock(
                 {"role": "system", "content": "Return only what the user asks for."},
                 {"role": "user", "content": prompt},
             ],
-            "max_completion_tokens": max_tokens,
+            "max_tokens": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
             "stream": False,
@@ -267,6 +266,10 @@ COMPARATIVE ANALYSIS QUESTIONS:
 - Which papers have significant limitations or flaws?
 - If all papers seem similar quality, re-evaluate more critically
 
+OUTPUT_FORMAT & CRITICAL RULES:
+1. DO NOT use double quotes (") inside the reasoning text. Use single quotes (') instead.
+2. DO NOT use newlines inside the reasoning text.
+
 Return ONLY a valid JSON array with exactly {num_papers} objects in this format:
 [
   {{
@@ -339,22 +342,25 @@ Write the summary now (output only the summary text, no preamble):""".strip()
 def fetch_papers_for_topic(topic_key: str, days_back: int = DAYS_LOOKBACK) -> List[Paper]:
     """Fetch papers for a specific topic using targeted search query."""
     topic_config = TOPIC_QUERIES[topic_key]
-    query = topic_config["query"]
+    base_query = topic_config["query"]
     max_papers = topic_config["max_papers"]
     topic_name = topic_config["name"]
     
+    # NEW: Combine the strict Computer Science categories with your topic keywords
+    full_query = f"{ARXIV_QUERY} AND {base_query}"
+    
     print(f"\nFetching {topic_name} papers...")
-    print(f"  Query: {query[:80]}...")
+    print(f"  Query: {full_query[:80]}...")
     
     search = arxiv.Search(
-        query=query,
+        query=full_query,  # <-- NEW: Make sure this says full_query, not query!
         max_results=max_papers,
         sort_by=arxiv.SortCriterion.SubmittedDate,
         sort_order=arxiv.SortOrder.Descending,
     )
     
     client = arxiv.Client(
-        page_size=100,
+        page_size=max_papers,
         delay_seconds=ARXIV_DELAY_SEC,
         num_retries=3
     )
@@ -362,7 +368,7 @@ def fetch_papers_for_topic(topic_key: str, days_back: int = DAYS_LOOKBACK) -> Li
     cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
     papers = []
     
-    for result in client.results(search):
+    for result in client.results(search): 
         if result.published and result.published >= cutoff:
             arxiv_id = result.get_short_id()
             html_url = f"https://arxiv.org/html/{arxiv_id}"
@@ -453,11 +459,10 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
     print(f"\nDetailed comparative scoring (batches of 10, top {top_k} per topic)...")
     print(f"Using model: {model_id}")
     
-    # Restored boto3 client
     bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
     scored_by_topic = {}
     
-    BATCH_SIZE = 10
+    BATCH_SIZE = 5
     
     for topic_key, topic_papers in papers_by_topic.items():
         topic_name = TOPIC_QUERIES[topic_key]["name"]
@@ -485,7 +490,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
                     model_id,
                     prompt,
                     max_tokens=PHASE2_MAX_TOKENS,
-                    temperature=PHASE2_TEMPERATURE, # Now uses 0.5 to prevent identical scoring
+                    temperature=PHASE2_TEMPERATURE,
                 )
                 
                 # Robust JSON array extraction using regex
@@ -525,7 +530,6 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
             except Exception as e:
                 print(f"  Error scoring batch: {e}")
                 if response_text:
-                    # Print the raw text so we can see why the regex/JSON failed
                     print(f"  [DEBUG] Raw output snippet: {repr(response_text[:400])}")
                     
                 # Assign default scores to batch
@@ -555,7 +559,6 @@ def generate_summaries_for_winners(papers_by_topic: Dict[str, List[Paper]], mode
     print(f"\nGenerating summaries (1 per topic)...")
     print(f"Using model: {model_id}")
     
-    # Restored boto3 client
     bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
     winners = {}
     
@@ -610,7 +613,7 @@ def generate_summaries_for_winners(papers_by_topic: Dict[str, List[Paper]], mode
 # S3 Upload
 # -------------------------
 
-def upload_to_s3(file_path: Path, bucket: str, prefix: str):
+def upload_to_s3(file_path: Path, bucket: str, prefix: str = ""):
     """Upload the generated JSON file to an S3 bucket."""
     if not bucket:
         return
@@ -629,6 +632,47 @@ def upload_to_s3(file_path: Path, bucket: str, prefix: str):
     except Exception as e:
         print(f"  ✗ Error uploading to S3: {e}")
 
+def update_weeks_index(week_date: str, bucket: str, out_dir: Path):
+    """Update the weeks.json index file locally and on S3 at the root."""
+    weeks_file = out_dir / "weeks.json"
+    weeks_list = []
+    
+    print("\nUpdating weeks.json index...")
+    
+    # 1. Try to load existing weeks from S3 (source of truth)
+    if bucket:
+        s3_client = boto3.client('s3', region_name=AWS_REGION)
+        s3_key = "weeks.json" # Strictly root
+        
+        try:
+            response = s3_client.get_object(Bucket=bucket, Key=s3_key)
+            weeks_list = json.loads(response['Body'].read().decode('utf-8'))
+            print(f"  ✓ Fetched existing weeks.json from S3 ({len(weeks_list)} weeks)")
+        except Exception as e:
+            print(f"  ! Could not fetch weeks.json from S3. Starting fresh or using local copy.")
+            if weeks_file.exists():
+                with open(weeks_file, 'r', encoding='utf-8') as f:
+                    weeks_list = json.load(f)
+    else:
+        # 2. If no S3, just use the local file
+        if weeks_file.exists():
+            with open(weeks_file, 'r', encoding='utf-8') as f:
+                weeks_list = json.load(f)
+    
+    # 3. Add current week if missing
+    if week_date not in weeks_list:
+        weeks_list.append(week_date)
+        
+    # Sort descending (newest first)
+    weeks_list.sort(reverse=True)
+    
+    # 4. Save locally
+    with open(weeks_file, 'w', encoding='utf-8') as f:
+        json.dump(weeks_list, f, indent=2)
+        
+    # 5. Upload to S3 at the ROOT level (prefix="")
+    if bucket:
+        upload_to_s3(weeks_file, bucket, prefix="")
 
 # -------------------------
 # Output
@@ -638,7 +682,6 @@ def create_weekly_output(winners: Dict[str, Paper], week_date: str) -> dict:
     """Create final weekly JSON output."""
     output = {
         "week_date": week_date,
-        # FIXED: Python 3.12 datetime warning resolved using timezone.utc
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "model": GPT_OSS_120B_MODEL_ID,
         "topics": {}
@@ -675,7 +718,6 @@ def main():
     print("AI Research Digest - Topic Query Pipeline")
     print("="*60)
     
-    # FIXED: Using timezone.utc to be safe
     week_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
     # Fetch papers by topic using targeted queries
@@ -698,6 +740,9 @@ def main():
     # Upload to S3 if configured
     if OUTPUT_BUCKET:
         upload_to_s3(out_file, OUTPUT_BUCKET, OUTPUT_PREFIX)
+        
+    # Update and upload weeks.json index
+    update_weeks_index(week_date, OUTPUT_BUCKET, OUT_DIR)
     
     print("\n" + "="*60)
     print("PIPELINE COMPLETE!")
