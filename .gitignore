@@ -5,6 +5,8 @@ old_data/
 logs/
 .env
 __pycache__/
+budget.json
+weeks.json
 papers/
 cache/
 out/
