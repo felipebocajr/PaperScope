@@ -226,25 +226,76 @@
       color: #d1d5db;
     }
 
+    /* ------------------------- */
+    /* Markdown Summary Styles   */
+    /* ------------------------- */
     .summary {
       font-size: 16px;
       color: #d1d5db;
       line-height: 1.6;
     }
 
-    /* Markdown Paragraph Spacing */
-    .summary p {
-      margin: 0 0 12px 0;
+    .summary p { margin: 0 0 16px 0; }
+    .summary p:last-child { margin-bottom: 0; }
+    .summary strong { color: #fff; font-weight: 700; }
+    .summary em { font-style: italic; color: #e5e7eb; }
+    
+    .summary h1, .summary h2, .summary h3, .summary h4, .summary h5, .summary h6 {
+      color: #fff;
+      margin: 24px 0 12px 0;
+      font-weight: 600;
+      line-height: 1.3;
     }
+    .summary h1 { font-size: 24px; }
+    .summary h2 { font-size: 20px; border-bottom: 1px solid #374151; padding-bottom: 6px; }
+    .summary h3 { font-size: 18px; }
+    .summary h4 { font-size: 16px; }
 
-    .summary p:last-child {
-      margin-bottom: 0;
+    .summary ul, .summary ol {
+      margin: 0 0 16px 0;
+      padding-left: 24px;
+    }
+    .summary li { margin-bottom: 8px; }
+    .summary li::marker { color: var(--accent-color); }
+
+    .summary blockquote {
+      border-left: 4px solid var(--accent-color);
+      margin: 0 0 16px 0;
+      padding: 12px 16px;
+      background: var(--accent-bg);
+      border-radius: 0 8px 8px 0;
+      color: #9ca3af;
+      font-style: italic;
+    }
+    .summary blockquote p:last-child { margin-bottom: 0; }
+
+    .summary code {
+      background: #1f2937;
+      padding: 3px 6px;
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 14px;
+      color: #60a5fa;
     }
     
-    .summary strong {
-      color: #fff;
+    .summary pre {
+      background: #0f1117;
+      border: 1px solid #374151;
+      padding: 16px;
+      border-radius: 12px;
+      overflow-x: auto;
+      margin: 0 0 16px 0;
+    }
+    .summary pre code {
+      background: transparent;
+      padding: 0;
+      color: #e5e7eb;
+      font-size: 13px;
     }
 
+    /* ------------------------- */
+    /* Bottom Metadata & Scores  */
+    /* ------------------------- */
     .authors {
       margin-top: 32px;
       padding-top: 24px;
@@ -273,7 +324,7 @@
 
     .scores-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
       gap: 16px;
       margin-top: 28px;
       background: var(--accent-bg);
@@ -290,7 +341,7 @@
     }
     
     .score-value {
-      font-size: 32px;
+      font-size: 30px;
       font-weight: 800;
       color: var(--text-primary);
       line-height: 1;
@@ -302,7 +353,7 @@
     }
     
     .score-label {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       color: var(--accent-hover);
       text-transform: uppercase;
@@ -533,7 +584,7 @@
       const topicName = topic.topic_name || topicKey;
       const authors = Array.isArray(p.authors) ? p.authors : [];
       
-      // Use Marked.js to parse the Markdown summary
+      // Marked.js automatically converts Markdown (**, -, >, #, `, etc.) into HTML
       const summaryHtml = p.summary ? marked.parse(p.summary) : "<span class='muted'>(Empty summary)</span>";
       const scores = p.scores || {};
 
@@ -552,6 +603,7 @@
           <div class="score-item"><span class="score-value">${scores.innovation ? scores.innovation.toFixed(1) : '-'}</span><span class="score-label">Innovation</span></div>
           <div class="score-item"><span class="score-value">${scores.impact ? scores.impact.toFixed(1) : '-'}</span><span class="score-label">Impact</span></div>
           <div class="score-item"><span class="score-value">${scores.methodology ? scores.methodology.toFixed(1) : '-'}</span><span class="score-label">Methodology</span></div>
+          <div class="score-item"><span class="score-value">${scores.topic_fit ? scores.topic_fit.toFixed(1) : '-'}</span><span class="score-label">Topic Fit</span></div>
         </div>` : ''}
         
         <div class="authors"><strong>Authors:</strong> ${escapeHtml(authors.join(", ") || "Unknown")}
@@ -559,7 +611,7 @@
         </div>
       `;
 
-      // Render LaTeX equations in the newly created summary element
+      // Render LaTeX equations mathematically
       const summaryEl = document.getElementById("paperSummary");
       renderMathInElement(summaryEl, {
         delimiters: [
