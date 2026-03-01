@@ -331,7 +331,7 @@ Title: {title}
 Full paper content:
 {full_text}
 
-Write the summary now (output only the summary text):""".strip()
+Write the summary now:""".strip()
 
 
 
@@ -430,7 +430,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
     scored_by_topic = {}
     
     BATCH_SIZE = 5
-    QUALIFIER_TOP_K = 10  # We send the Top 10 to the Finals
+    QUALIFIER_TOP_K = 5
     
     for topic_key, topic_papers in papers_by_topic.items():
         topic_name = TOPIC_QUERIES[topic_key]["name"]
@@ -497,7 +497,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
         finalists.sort(key=lambda p: p.weighted_score, reverse=True)
         top_papers = finalists[:top_k]
         
-        print(f"\n  Final Top {len(top_papers)} papers:")
+        print(f"\n  Final Top {len(top_papers)} papers (total of {len(QUALIFIER_TOP_K)} papers):")
         for i, paper in enumerate(top_papers, 1):
             print(f"    {i}. [{paper.weighted_score:.2f}] (I:{paper.innovation:.1f} M:{paper.impact:.1f} Me:{paper.methodology:.1f}) {paper.title[:50]}")
         
@@ -625,9 +625,8 @@ def main():
     if OUTPUT_BUCKET:
         upload_to_s3(out_file, OUTPUT_BUCKET, OUTPUT_PREFIX)
     
-    # FIXED: Calling without OUTPUT_PREFIX so it uploads to root
     update_weeks_index(week_date, OUTPUT_BUCKET, OUT_DIR)
-    
+
     print("\n" + "="*60)
     print("PIPELINE COMPLETE!")
     print("="*60)
