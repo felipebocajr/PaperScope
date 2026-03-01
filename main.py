@@ -361,6 +361,8 @@ The order and emphasis should fit the paper - don't force a formula.
 - Avoid formulaic transitions: "The authors demonstrate," "Results show that"
 - Use active voice and varied sentence structure
 - Be measured about claims - don't amplify hype, but acknowledge genuine advances
+- Use markdown formatting naturally: **bold** for genuinely critical terms or standout numbers, 
+  *italics* for emphasis. Do not use headings, bullet points, or lists — prose only.
 </style_guidance>
 
 <constraints>
