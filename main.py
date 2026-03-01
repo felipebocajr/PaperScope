@@ -20,17 +20,18 @@ load_dotenv()
 # Configuration
 # -------------------------
 
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-GPT_OSS_120B_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "openai.gpt-oss-120b-1:0")
+AWS_REGION = os.getenv("AWS_REGION")
+MODEL_ID = "openai.gpt-oss-120b-1:0"
 
 # Optional: S3 Upload
-OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET", "")
-OUTPUT_PREFIX = os.getenv("OUTPUT_PREFIX", "")
+OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET")
+OUTPUT_PREFIX = os.getenv("OUTPUT_PREFIX")
 
-# Topics with search queries
+# Topics with search queries AND descriptions for the LLM
 TOPIC_QUERIES = {
     "agentic_ai": {
         "name": "Agentic AI",
+        "description": "Research involving autonomous agents, tool use, multi-agent systems, and complex planning.",
         "query": '''(ti:agent OR ti:agentic OR ti:"tool use" OR ti:planning OR 
                      ti:"multi-agent" OR abs:"autonomous agent" OR abs:"tool calling" OR 
                      abs:"action space")''',
@@ -38,6 +39,7 @@ TOPIC_QUERIES = {
     },
     "reinforcement_learning": {
         "name": "Reinforcement Learning",
+        "description": "Research on RL, RLHF, policy optimization, and reward modeling.",
         "query": '''(ti:"reinforcement learning" OR ti:RLHF OR ti:PPO OR ti:DPO OR 
                      ti:"policy optimization" OR abs:"reward model" OR abs:"Q-learning" OR
                      abs:"actor-critic")''',
@@ -45,6 +47,7 @@ TOPIC_QUERIES = {
     },
     "llms_applications": {
         "name": "LLMs & Applications",
+        "description": "Research concerning large language models, prompt engineering, RAG, and fine-tuning.",
         "query": '''(ti:LLM OR ti:"language model" OR ti:"fine-tuning" OR ti:RAG OR 
                      ti:"prompt engineering" OR abs:"retrieval augmented" OR 
                      abs:"instruction tuning" OR abs:"in-context learning")''',
@@ -52,6 +55,7 @@ TOPIC_QUERIES = {
     },
     "computer_vision": {
         "name": "Computer Vision",
+        "description": "Research focusing purely on visual recognition, image segmentation, and object detection (excluding multimodal text-to-image).",
         "query": '''((ti:vision OR ti:image OR ti:detection OR ti:segmentation OR 
                       ti:"object detection" OR abs:"convolutional" OR abs:"visual recognition")
                      AND NOT (ti:language OR ti:multimodal OR ti:"vision-language" OR 
@@ -60,8 +64,36 @@ TOPIC_QUERIES = {
     },
     "multimodal": {
         "name": "Multimodal",
+        "description": "Research combining multiple modalities like vision, language, audio, and cross-modal systems.",
         "query": '''(ti:multimodal OR ti:"vision-language" OR ti:CLIP OR ti:"cross-modal" OR 
                      abs:"vision and language" OR abs:"audio-visual" OR abs:"video-language")''',
+        "max_papers": 300
+    },
+    "industrial_ml": {
+        "name": "ML for Industrial & Physical Systems",
+        "description": "Machine learning applied to physical systems, industrial IoT, predictive maintenance, sensor data, and edge deployment.",
+        "query": '''(
+                    (ti:"predictive maintenance" OR ti:"anomaly detection" OR 
+                    ti:"fault detection" OR ti:"fault diagnosis" OR
+                    ti:"remaining useful life" OR ti:"condition monitoring" OR
+                    ti:"industrial IoT" OR ti:"IIoT" OR
+                    abs:"bearing fault" OR abs:"motor current" OR 
+                    abs:"vibration signal" OR abs:"SCADA" OR
+                    abs:"sensor fusion" OR abs:"equipment failure" OR
+                    abs:"rotating machinery" OR abs:"gearbox" OR
+                    abs:"induction motor" OR abs:"prognostics")
+                    OR
+                    (ti:"time series" AND (abs:"industrial" OR abs:"manufacturing" OR 
+                                        abs:"machinery" OR abs:"sensor"))
+                    OR
+                    (ti:"edge" AND (abs:"deployment" OR abs:"inference") AND 
+                                (abs:"industrial" OR abs:"embedded" OR abs:"IoT"))
+                )
+                AND NOT (ti:weather OR ti:climate OR ti:atmospheric OR ti:aviation OR
+                        ti:"partial differential" OR ti:PDE OR ti:"Navier-Stokes" OR
+                        ti:"fluid dynamics" OR ti:aerodynamic OR ti:medical OR 
+                        ti:clinical OR ti:genomic OR abs:"reanalysis" OR
+                        abs:"numerical solver" OR abs:"finite element")''',
         "max_papers": 300
     }
 }
@@ -69,15 +101,14 @@ TOPIC_QUERIES = {
 TOPICS = {k: v["name"] for k, v in TOPIC_QUERIES.items()}
 TOPIC_DISPLAY_NAMES = TOPICS
 
-# FIXED: Strict CS Categories so we don't grab Physics/Math papers by accident
-ARXIV_QUERY = os.getenv("ARXIV_QUERY", "(cat:cs.AI OR cat:cs.LG OR cat:cs.CV OR cat:cs.CL)")
-MAX_RESULTS = int(os.getenv("ARXIV_MAX_RESULTS", "1000"))
-DAYS_LOOKBACK = int(os.getenv("ARXIV_DAYS_LOOKBACK", "7"))
-TOP_K_PER_TOPIC = int(os.getenv("TOP_K_PER_TOPIC", "5"))
+ARXIV_QUERY = "(cat:cs.AI OR cat:cs.LG OR cat:cs.CV OR cat:cs.CL)"
+MAX_RESULTS = 1000
+DAYS_LOOKBACK = 7
+TOP_K_PER_TOPIC = 5
 
 # Rate limiting
 ARXIV_DELAY_SEC = 5
-HTTP_TIMEOUT_SEC = int(os.getenv("HTTP_TIMEOUT_SEC", "60"))
+HTTP_TIMEOUT_SEC = 60
 
 # Directories
 CACHE_DIR = Path(os.getenv("CACHE_DIR", "./cache"))
@@ -86,10 +117,10 @@ CACHE_DIR.mkdir(exist_ok=True)
 OUT_DIR.mkdir(exist_ok=True)
 
 # LLM parameters
-PHASE1_MAX_TOKENS = 400
+PHASE1_MAX_TOKENS = 500
 PHASE1_TEMPERATURE = 0.0
 
-PHASE2_MAX_TOKENS = 3500 
+PHASE2_MAX_TOKENS = 4500
 PHASE2_TEMPERATURE = 0.5 
 
 PHASE3_MAX_TOKENS = 900
@@ -111,6 +142,7 @@ class PaperEvaluation(BaseModel):
     innovation: float = Field(ge=0.0, le=10.0, description="Score for challenging assumptions or introducing new approaches.")
     impact: float = Field(ge=0.0, le=10.0, description="Score for performance improvements and real-world potential.")
     methodology: float = Field(ge=0.0, le=10.0, description="Score for reproducibility and solid approach.")
+    topic_fit: float = Field(ge=0.0, le=10.0, description="Score for how well the paper fits the specific topic category.")
 
 
 # -------------------------
@@ -134,11 +166,24 @@ class Paper:
     innovation: float = 0.0
     impact: float = 0.0
     methodology: float = 0.0
+    topic_fit: float = 0.0
     weighted_score: float = 0.0
     detailed_reasoning: str = ""
     
     # Phase 3: Summary
     final_summary: str = ""
+
+
+# -------------------------
+# Math Logic
+# -------------------------
+
+def calculate_final_score(innovation: float, impact: float, methodology: float, topic_fit: float) -> float:
+    """Calculates weighted score and applies topic_fit penalty multiplier."""
+    base_score = (innovation * 0.35) + (impact * 0.35) + (methodology * 0.30)
+    # topic_fit acts as a multiplier: 10 = no penalty, 5 = 25% penalty, 0 = 50% penalty
+    topic_multiplier = 0.5 + (topic_fit / 10.0) * 0.5
+    return round(base_score * topic_multiplier, 2)
 
 
 # -------------------------
@@ -191,7 +236,7 @@ def invoke_bedrock(bedrock_client, model_id: str, prompt: str, max_tokens: int =
 # Prompts
 # -------------------------
 
-def build_comparative_batch_scoring_prompt(papers_batch: List[Paper]) -> str:
+def build_comparative_batch_scoring_prompt(papers_batch: List[Paper], topic_name: str, topic_description: str) -> str:
     """PASS 1: Score a batch of papers quickly to filter out the noise."""
     papers_text = ""
     for i, paper in enumerate(papers_batch, 1):
@@ -200,13 +245,17 @@ def build_comparative_batch_scoring_prompt(papers_batch: List[Paper]) -> str:
     num_papers = len(papers_batch)
     return f"""You are an expert AI/ML research evaluator. Evaluate this batch of papers.
 
+This batch was fetched for the topic: **{topic_name}**
+Topic description: {topic_description}
+
 SCORING CRITERIA (0.0-10.0 scale):
 - Innovation: Does the paper challenge assumptions or introduce genuinely novel approaches?
 - Impact: Performance improvements? Real-world application potential?
 - Methodology: Well-explained? Reproducible? Solid technical approach?
+- Topic Fit: How well does this paper belong to '{topic_name}'? A paper about prompt injection evaluated under 'Agentic AI' should score lower than one directly about agent architectures.
 
 OUTPUT_FORMAT & CRITICAL RULES:
-1. DO NOT use double quotes (") inside the reasoning text. Use single quotepss (') instead.
+1. DO NOT use double quotes (") inside the reasoning text. Use single quotes (') instead.
 2. DO NOT use newlines inside the reasoning text.
 
 Return ONLY a valid JSON array with exactly {num_papers} objects in this format:
@@ -216,7 +265,8 @@ Return ONLY a valid JSON array with exactly {num_papers} objects in this format:
     "reasoning": "[Your comparative analysis for this paper, 2-3 sentences]",
     "innovation": <score 0.0-10.0>,
     "impact": <score 0.0-10.0>,
-    "methodology": <score 0.0-10.0>
+    "methodology": <score 0.0-10.0>,
+    "topic_fit": <score 0.0-10.0>
   }}
 ]
 
@@ -226,7 +276,7 @@ PAPERS TO EVALUATE:
 JSON array:""".strip()
 
 
-def build_finals_scoring_prompt(papers_batch: List[Paper]) -> str:
+def build_finals_scoring_prompt(papers_batch: List[Paper], topic_name: str, topic_description: str) -> str:
     """PASS 2: The Finals. Strictly rank the top papers against each other to fix the baseline."""
     papers_text = ""
     for i, paper in enumerate(papers_batch, 1):
@@ -234,7 +284,9 @@ def build_finals_scoring_prompt(papers_batch: List[Paper]) -> str:
     
     num_papers = len(papers_batch)
     return f"""You are an expert AI/ML research evaluator judging the "Finals" for a weekly digest.
-These {num_papers} papers are the absolute best papers of the week. 
+These {num_papers} papers are the absolute best papers of the week for the topic: **{topic_name}**.
+
+Topic description: {topic_description}
 
 YOUR TASK:
 Read all {num_papers} abstracts and rank them STRICTLY against each other. 
@@ -245,6 +297,7 @@ SCORING CRITERIA (0.0-10.0 scale, use decimals):
 - Innovation: Novelty and paradigm-shifting ideas.
 - Impact: Real-world utility and performance gains.
 - Methodology: Rigor and reproducibility.
+- Topic Fit: Does it truly fit the {topic_name} category? Penalize papers that are excellent overall but off-topic.
 
 OUTPUT_FORMAT & CRITICAL RULES:
 1. NO TIES ALLOWED: Force a strict ranking/spread of scores.
@@ -258,7 +311,8 @@ Return ONLY a valid JSON array with exactly {num_papers} objects in this format:
     "reasoning": "[Your strict comparative ranking analysis, 2-3 sentences]",
     "innovation": <score 0.0-10.0>,
     "impact": <score 0.0-10.0>,
-    "methodology": <score 0.0-10.0>
+    "methodology": <score 0.0-10.0>,
+    "topic_fit": <score 0.0-10.0>
   }}
 ]
 
@@ -423,7 +477,7 @@ def download_and_extract_html(paper: Paper) -> str:
 # Phase 2: Tournament Scoring
 # -------------------------
 
-def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = TOP_K_PER_TOPIC, model_id: str = GPT_OSS_120B_MODEL_ID) -> Dict[str, List[Paper]]:
+def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = TOP_K_PER_TOPIC, model_id: str = MODEL_ID) -> Dict[str, List[Paper]]:
     """Two-Pass Tournament Scoring: Qualifiers -> Finals"""
     print(f"\nStarting Two-Pass Tournament Scoring...")
     bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
@@ -434,6 +488,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
     
     for topic_key, topic_papers in papers_by_topic.items():
         topic_name = TOPIC_QUERIES[topic_key]["name"]
+        topic_desc = TOPIC_QUERIES[topic_key]["description"]
         
         if not topic_papers:
             scored_by_topic[topic_key] = []
@@ -447,7 +502,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
             batch = topic_papers[batch_start:batch_end]
             
             try:
-                prompt = build_comparative_batch_scoring_prompt(batch)
+                prompt = build_comparative_batch_scoring_prompt(batch, topic_name, topic_desc)
                 response_text = invoke_bedrock(bedrock, model_id, prompt, max_tokens=PHASE2_MAX_TOKENS, temperature=PHASE2_TEMPERATURE)
                 
                 json_match = re.search(r'\[\s*\{.*\}\s*\]', response_text, re.DOTALL)
@@ -461,8 +516,13 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
                         paper.innovation = score_obj.innovation
                         paper.impact = score_obj.impact
                         paper.methodology = score_obj.methodology
+                        paper.topic_fit = score_obj.topic_fit
                         paper.detailed_reasoning = score_obj.reasoning
-                        paper.weighted_score = (paper.innovation * 0.5 + paper.impact * 0.3 + paper.methodology * 0.2)
+                        
+                        # Apply new logic with topic multiplier
+                        paper.weighted_score = calculate_final_score(
+                            paper.innovation, paper.impact, paper.methodology, paper.topic_fit
+                        )
             except Exception as e:
                 for paper in batch: paper.weighted_score = 0.0
         
@@ -473,7 +533,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
         # --- PASS 2: THE FINALS ---
         print(f"  🏆 [THE FINALS] Calibrating the Top {len(finalists)} papers against each other...")
         try:
-            prompt = build_finals_scoring_prompt(finalists)
+            prompt = build_finals_scoring_prompt(finalists, topic_name, topic_desc)
             # Temperature lowered to 0.3 for strict, analytical ranking
             response_text = invoke_bedrock(bedrock, model_id, prompt, max_tokens=PHASE2_MAX_TOKENS, temperature=0.3)
             
@@ -488,8 +548,13 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
                     paper.innovation = score_obj.innovation
                     paper.impact = score_obj.impact
                     paper.methodology = score_obj.methodology
+                    paper.topic_fit = score_obj.topic_fit
                     paper.detailed_reasoning = score_obj.reasoning
-                    paper.weighted_score = (paper.innovation * 0.5 + paper.impact * 0.3 + paper.methodology * 0.2)
+                    
+                    # Apply new logic with topic multiplier
+                    paper.weighted_score = calculate_final_score(
+                        paper.innovation, paper.impact, paper.methodology, paper.topic_fit
+                    )
         except Exception as e:
             print(f"  Error in Finals: {e} - Falling back to Qualifier scores.")
             
@@ -497,9 +562,9 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
         finalists.sort(key=lambda p: p.weighted_score, reverse=True)
         top_papers = finalists[:top_k]
         
-        print(f"\n  Final Top {len(top_papers)} papers (total of {len(QUALIFIER_TOP_K)} papers):")
+        print(f"\n  Final Top {len(top_papers)} papers:")
         for i, paper in enumerate(top_papers, 1):
-            print(f"    {i}. [{paper.weighted_score:.2f}] (I:{paper.innovation:.1f} M:{paper.impact:.1f} Me:{paper.methodology:.1f}) {paper.title[:50]}")
+            print(f"    {i}. [{paper.weighted_score:.2f}] (I:{paper.innovation:.1f} M:{paper.methodology:.1f} Fit:{paper.topic_fit:.1f}) {paper.title[:50]}")
         
         scored_by_topic[topic_key] = top_papers
     
@@ -510,7 +575,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
 # Phase 3: Generate summaries
 # -------------------------
 
-def generate_summaries_for_winners(papers_by_topic: Dict[str, List[Paper]], model_id: str = GPT_OSS_120B_MODEL_ID) -> Dict[str, Paper]:
+def generate_summaries_for_winners(papers_by_topic: Dict[str, List[Paper]], model_id: str = MODEL_ID) -> Dict[str, Paper]:
     print(f"\nGenerating summaries (1 per topic)...")
     bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
     winners = {}
@@ -579,7 +644,7 @@ def create_weekly_output(winners: Dict[str, Paper], week_date: str) -> dict:
     output = {
         "week_date": week_date,
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "model": GPT_OSS_120B_MODEL_ID,
+        "model": MODEL_ID,
         "topics": {}
     }
     for topic_key, paper in winners.items():
@@ -596,6 +661,7 @@ def create_weekly_output(winners: Dict[str, Paper], week_date: str) -> dict:
                     "innovation": paper.innovation,
                     "impact": paper.impact,
                     "methodology": paper.methodology,
+                    "topic_fit": paper.topic_fit,
                     "weighted": paper.weighted_score,
                 }
             }
@@ -631,8 +697,6 @@ def main():
     print("PIPELINE COMPLETE!")
     print("="*60)
     
-    # AWS EC2 AUTO-SHUTDOWN:
-    # This ensures your server turns off immediately after finishing, saving you money!
     print("Shutting down EC2 instance to save costs...")
     os.system("sudo shutdown -h now")
 
