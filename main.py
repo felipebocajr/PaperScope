@@ -270,15 +270,69 @@ JSON array:""".strip()
 
 def build_summary_prompt(full_text: str, title: str) -> str:
     """Phase 3: Generate accessible summary from full HTML."""
-    return f"""You are an expert technical writer creating a weekly AI/ML research digest for practitioners.
-Write 3-4 short paragraphs that flow naturally summarizing the core approach, metrics, and implications.
-Keep it between 220-260 words.
+    return f"""You are an expert technical writer creating research summaries for a diverse AI/ML audience. Your summaries appear in a weekly digest read by practitioners ranging from early-career data scientists to technical managers.
+
+<audience>
+Your readers span from junior practitioners to technical leaders:
+- Early-career data scientists and ML engineers learning the field
+- Experienced practitioners keeping up with research
+- Technical managers making technology decisions
+All understand ML fundamentals, but depth of expertise varies. Balance technical precision with clarity.
+</audience>
+
+<writing_principles>
+- Be direct and specific - avoid vague openings like "This paper addresses..."
+- Use technical terminology when necessary, but briefly explain specialized concepts inline
+- Assume familiarity with core ML (neural networks, training, inference) but not niche subfields
+- Write with confidence - state what the work accomplishes, not what it "attempts"
+- Vary your narrative structure to match each paper's contribution
+- Make technical depth accessible without oversimplifying
+</writing_principles>
+
+<content_requirements>
+Your summary should naturally incorporate:
+- What makes this work significant (lead with this if compelling)
+- The core technical approach - explain key innovations clearly
+- Concrete results: metrics, scale, comparisons, or theoretical guarantees
+- Practical relevance: why this matters for building systems, choosing methods, or understanding the field
+
+The order and emphasis should fit the paper - don't force a formula.
+</content_requirements>
+
+<style_guidance>
+- Professional and precise, but not overly academic
+- More akin to a technical blog (Distill, The Gradient) than a research abstract
+- When using specialized terms, provide brief context (e.g., "KL divergence, a measure of distribution difference")
+- Avoid overused phrases: "game-changer," "revolutionary," "unlock," "leverage"
+- Avoid formulaic transitions: "The authors demonstrate," "Results show that"
+- Use active voice and varied sentence structure
+- Be measured about claims - don't amplify hype, but acknowledge genuine advances
+</style_guidance>
+
+<constraints>
+- Length: 220-260 words
+- Format: 3-4 paragraphs with natural flow
+- No headings, bullet points, or numbered lists
+- Vary opening hooks - avoid repetitive patterns
+</constraints>
+
+<reference_example>
+Here's an example of the tone and depth to aim for:
+
+"It's startling how a single, cleverly crafted sentence can hijack an entire AI assistant, turning a helpful planner loop into a conduit for unsafe tool calls. That hidden attack surface has been a blind spot ever since developers started stitching together LLM prompts, code execution, and external APIs into autonomous agents.
+
+The authors answer this gap with the LLMbda calculus, an untyped call-by-value lambda calculus—essentially a minimal programming language that evaluates expressions by substituting values—augmented by dynamic information-flow control, which tracks how data moves through the system to enforce security policies..."
+
+Note: Technical terms are used but explained inline. Sophisticated but accessible.
+</reference_example>
 
 Title: {title}
-Content:
+
+Full paper content:
 {full_text}
 
-Write the summary now (output only the summary text, no preamble):""".strip()
+Write the summary now (output only the summary text):""".strip()
+
 
 
 # -------------------------
