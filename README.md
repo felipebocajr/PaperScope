@@ -1,112 +1,104 @@
-AI Research Digest 🧠📚
+﻿# PaperScope
 
-An automated pipeline and serverless web application that extracts, evaluates, and summarizes the best Artificial Intelligence research papers from arXiv every week.
+PaperScope is an automated pipeline and static web application that curates, evaluates, and summarizes the top AI research papers from arXiv on a weekly basis. It uses Large Language Models to rank papers across predefined research topics and publishes the results as a lightweight, serverless web digest.
 
-This project addresses the "information overload" problem in AI research by utilizing Large Language Models (LLMs) to act as an expert panel of judges. The pipeline scores papers, selects winners across various categories, and publishes a sleek, static web page to an AWS S3 bucket.
+---
 
-✨ Key Features
+## How It Works
 
-Targeted arXiv Extraction: Searches for recent papers using complex queries filtered strictly by Computer Science categories (cs.AI, cs.LG, cs.CV, cs.CL) to eliminate noise from unrelated fields.
+The pipeline runs once per week on a scheduled EC2 instance and produces a static JSON output consumed directly by the frontend.
 
-Two-Pass Tournament Scoring: Solves the context window fragmentation problem common in LLMs.
+1. **Fetch** — Targeted arXiv queries retrieve recent papers filtered by Computer Science categories (`cs.AI`, `cs.LG`, `cs.CV`, `cs.CL`) across six research topics.
+2. **Score (Qualifiers)** — Papers are evaluated in batches. Each batch is scored on four criteria: innovation, impact, methodology, and topic fit. The top 10 candidates per topic advance.
+3. **Score (Finals)** — The 10 finalists are ranked directly against each other to calibrate a global baseline and select the definitive winner.
+4. **Summarize** — The winning paper per topic receives a 220-260 word plain-text summary and a technical glossary, generated from the full paper HTML.
+5. **Publish** — Results are written as JSON files to an S3 bucket. The EC2 instance shuts itself down on completion.
 
-Phase 1 (Qualifiers): Evaluates papers in batches of 5 to filter noise and identify the top 10 candidates.
+---
 
-Phase 2 (Finals): Directly compares the top 10 finalists against each other to calibrate a global baseline and determine the definitive winner.
+## Research Topics
 
-Accessible Summaries: Extracts full HTML text from arXiv to generate 220-260 word summaries tailored for practitioners (ML Engineers, Data Scientists).
+- Agentic AI
+- Reinforcement Learning
+- LLMs & Applications
+- Computer Vision
+- Multimodal
+- ML for Industrial & Physical Systems
 
-Single-File Frontend: A modern, responsive (Dark Mode) static web app consolidated into a single index.html file for extreme cost optimization and fast load times on S3.
+Topics and their search queries are configured in the `TOPIC_QUERIES` dictionary in `main.py`. The frontend adapts dynamically to whatever topics are present in the JSON output.
 
-AWS Cost Efficiency: Runs on a low-cost Amazon EC2 instance that is triggered by a schedule and automatically shuts down as soon as the pipeline completes, reducing compute costs to pennies per month.
+---
 
-🏗️ Architecture
+## Architecture
 
-Scheduling: Amazon EventBridge starts the EC2 instance (e.g., every Monday at 02:00).
+| Component | Service | Role |
+|---|---|---|
+| Scheduler | Amazon EventBridge | Starts EC2 on a cron schedule |
+| Worker | Amazon EC2 (t3.micro) | Runs the pipeline on boot |
+| LLM | Amazon Bedrock | Scoring and summarization |
+| Storage | Amazon S3 | Hosts JSON data and `index.html` |
+| Frontend | Static HTML/JS | Reads JSON from S3, renders the digest |
 
-Execution (CRON): A Linux cron job triggers main.py upon startup.
+---
 
-Processing:
+## Project Structure
 
-Fetches arXiv metadata.
+```
+.
+├── main.py              # Pipeline: fetch, score, summarize, upload, shutdown
+├── index.html           # Frontend: single-file static web app
+├── requirements.txt     # Python dependencies
+├── weeks.json           # Index of available weekly digests
+└── cache/               # Auto-generated temporary cache
+```
 
-Interacts with Amazon Bedrock (e.g., openai.gpt-oss-120b-1:0) to evaluate and summarize papers.
+---
 
-Storage: Processed JSON files (weeks.json and YYYY-MM-DD.json) are uploaded to a public Amazon S3 bucket.
+## Setup
 
-Shutdown: The Python script invokes the OS shutdown command to power off the EC2 instance.
+### Prerequisites
 
-Presentation: Users access index.html on S3, which dynamically consumes the JSON data.
+- Python 3.9+
+- AWS account with access to S3, EC2, and Amazon Bedrock
 
-🚀 Setup & Installation
+### Local
 
-Prerequisites
-
-Python 3.9+
-
-AWS Account with permissions for S3, EC2, and Amazon Bedrock.
-
-Local Installation
-
-Clone the repository:
-
-git clone [https://github.com/YOUR-USERNAME/PaperScope.git](https://github.com/YOUR-USERNAME/PaperScope.git)
+```bash
+git clone https://github.com/YOUR-USERNAME/PaperScope.git
 cd PaperScope
-
-
-Install dependencies:
-
 pip install -r requirements.txt
+```
 
+Create a `.env` file:
 
-Configure environment variables in a .env file:
-
+```
 AWS_REGION=us-east-1
-BEDROCK_MODEL_ID=openai.gpt-oss-120b-1:0
 OUTPUT_BUCKET=your-s3-bucket-name
 OUTPUT_PREFIX=weeks
+```
 
+### AWS
 
-AWS Configuration
+**S3**
+- Create a bucket and disable "Block all public access"
+- Add a bucket policy granting public `s3:GetObject`
+- Configure CORS to allow `GET` from your domain
+- Upload `index.html` to the bucket root
 
-1. Amazon S3 (Frontend & Data)
+**EC2**
+- Launch a `t3.micro` instance (Amazon Linux 2023)
+- Attach an IAM role with `AmazonS3FullAccess` and `AmazonBedrockFullAccess`
+- Add a startup cron job:
 
-Create an S3 bucket and disable "Block all public access."
-
-Add a Bucket Policy to allow public read access (s3:GetObject).
-
-Configure CORS rules to allow GET methods from your domain.
-
-Upload index.html to the root of the bucket.
-
-2. Amazon EC2 (Pipeline Worker)
-
-Launch a t3.micro instance with Amazon Linux 2023.
-
-Create and attach an IAM Role with AmazonS3FullAccess and AmazonBedrockFullAccess policies.
-
-Transfer your code to the instance and install dependencies.
-
-Add a cron job (crontab -e):
-
+```
 @reboot sleep 60 && cd /home/ec2-user/PaperScope && python3 main.py > pipeline.log 2>&1
+```
 
+**EventBridge**
+- Create a scheduler targeting the EC2 `StartInstances` API with your instance ID
 
-3. Amazon EventBridge (Scheduler)
+---
 
-Create a Scheduler in EventBridge to trigger the EC2: StartInstances API at your desired time, setting your EC2 Instance ID as the target.
+## Stack
 
-📂 Project Structure
-
-.
-├── main.py              # Core pipeline (Scraping, LLM, S3 Upload, and Shutdown)
-├── requirements.txt     # Python dependencies
-├── index.html           # Unified static frontend (HTML, CSS, and JS)
-└── cache/               # (Auto-generated) Temporary file cache
-
-
-🛠️ Modifying Topics
-
-You can add or modify research categories by editing the TOPIC_QUERIES dictionary in main.py. The index.html frontend dynamically adapts its dropdown menus based on the generated JSON—no HTML code changes required!
-
-Built with Python, AWS, and advanced LLMs.
+Python · AWS S3 · AWS EC2 · AWS Bedrock · Amazon EventBridge · arXiv API
