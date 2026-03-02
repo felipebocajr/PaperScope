@@ -365,19 +365,19 @@ The order and emphasis should fit the paper - don't force a formula.
 - More akin to a technical blog (Distill, The Gradient) than a research abstract
 - Avoid overused phrases: "game-changer," "revolutionary," "unlock," "leverage"
 - Use active voice and varied sentence structure
-- Use markdown formatting naturally: **bold** for genuinely critical terms or standout numbers, *italics* for emphasis.
+- Output plain text only. Do not use markdown syntax such as **bold**, *italics*, headings, or bullet lists.
 </style_guidance>
 
 <output_format>
 You MUST return ONLY a valid JSON object. Do not wrap it in markdown code blocks if possible.
 The JSON must contain two keys:
-1. "summary": A 220-260 word markdown summary (3-4 paragraphs) following the style guidance above.
+1. "summary": A 220-260 word plain text summary (3-4 paragraphs) following the style guidance above. Keep normal line breaks between paragraphs.
 2. "glossary": Identify 3-6 complex acronyms or technical concepts used in your summary. Provide a clear, detailed 2-sentence explanation for each.
    CRITICAL: The keys in this dictionary MUST be exact, case-sensitive substrings of the text in your summary.
 
 Format:
 {{
-  "summary": "Your markdown formatted summary here...",
+    "summary": "Your plain text summary here...",
   "glossary": {{
     "TERM 1": "Detailed 2-sentence explanation of term 1.",
     "TERM 2": "Detailed 2-sentence explanation of term 2."

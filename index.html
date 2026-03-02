@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
@@ -76,47 +76,42 @@
       box-shadow: 0 4px 20px rgba(0,0,0,.3);
     }
 
-    /* ── LAYOUT FLEXBOX (Substitui o Grid) ── */
+    /* ── PAGE LAYOUT ── */
     .page-layout {
-      display: flex;
-      gap: 32px;
-      max-width: 1300px;
+      max-width: 1280px;
       margin: 0 auto;
-      align-items: flex-start;
-      justify-content: center;
+      width: 100%;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 28px;
+      align-items: start;
+    }
+
+    .filters-panel {
+      position: sticky;
+      top: 16px;
     }
 
     .main-content {
-      flex: 1;
       max-width: 920px;
       width: 100%;
-      min-width: 0;
+      margin: 0 auto;
     }
 
-    .sidebar-content {
-      width: 320px;
-      flex-shrink: 0;
-      position: sticky;
-      top: 24px;
-      display: none; /* Oculto até carregar glossário */
+    @media (max-width: 1024px) {
+      .page-layout { grid-template-columns: 1fr; gap: 16px; }
+      .filters-panel { position: static; }
+      .main-content { max-width: 100%; }
     }
 
-    @media (max-width: 1100px) {
-      .page-layout { flex-direction: column; align-items: center; }
-      .sidebar-content { width: 100%; max-width: 920px; position: static; }
-    }
-
-    /* CONTROLS (agora dentro do main-content) */
-    .controls-card {
-      margin: 0 0 16px 0;
-    }
+    /* CONTROLS */
+    .controls-card { margin: 0; }
     .controls-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px 28px;
+      grid-template-columns: 1fr;
+      gap: 16px;
       align-items: start;
     }
-    @media (max-width: 680px) { .controls-grid { grid-template-columns: 1fr; } }
 
     label.ctrl-label {
       display: block;
@@ -128,7 +123,7 @@
       margin-bottom: 8px;
     }
 
-    /* SELECT PADRÃO (Para Semana e Tópico) */
+    /* SELECT STYLES */
     select {
       width: 100%;
       background: #1f2937;
@@ -145,14 +140,25 @@
     select:disabled { opacity: .5; cursor: not-allowed; }
 
     /* PAPER */
-    .paper-header { text-align: center; margin-bottom: 24px; padding: 0 8px; }
-    .paper-title  { margin: 16px 0; font-size: 26px; line-height: 1.35; font-weight: 800; }
+    .paper-header {
+      text-align: center;
+      margin-bottom: 16px;
+      padding: 20px 24px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.3);
+    }
+    .paper-title  { margin: 14px 0 0; font-size: 28px; line-height: 1.3; font-weight: 800; letter-spacing: -0.4px; }
+    .paper-title a { color: var(--text-primary); transition: color .2s; }
+    .paper-title a:hover { color: var(--accent-hover); }
     .paper-meta   { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
     .badge {
       display: inline-flex; align-items: center;
-      padding: 6px 14px; border-radius: 8px;
-      background: #1f2937; border: 1px solid #374151;
-      font-size: 13px; font-weight: 500; color: #d1d5db;
+      padding: 8px 16px; border-radius: 999px;
+      background: var(--accent-bg); border: 1px solid rgba(59,130,246,.35);
+      font-size: 12px; font-weight: 700; color: #bfdbfe;
+      letter-spacing: .2px;
     }
 
     /* SUMMARY */
@@ -178,11 +184,52 @@
     }
     .glossary-link:hover { background: rgba(59,130,246,.3); color: #fff; }
 
-    /* GLOSSARY */
+    /* ── SLIDING SIDEBAR (GLOSSARY) ── */
+    .sidebar-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      z-index: 998; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+    }
+    .sidebar-backdrop.open { opacity: 1; pointer-events: auto; }
+
+    .sidebar-content {
+      position: fixed; top: 0; right: -400px;
+      width: 100%; max-width: 380px; height: 100vh;
+      background: var(--bg);
+      border-left: 1px solid var(--card-border);
+      padding: 0;
+      overflow-y: auto;
+      transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 999;
+      box-shadow: -8px 0 30px rgba(0,0,0,0.6);
+    }
+    .sidebar-content.open { right: 0; }
+
+    .sidebar-inner {
+      padding: 24px 20px;
+      display: flex; flex-direction: column; min-height: 100%;
+    }
+
+    /* GLOSSARY TAB BUTTON (Floating) */
+    .glossary-tab {
+      position: fixed; top: 50%; right: 0; transform: translateY(-50%);
+      background: var(--card-bg); border: 1px solid var(--card-border); border-right: none;
+      padding: 12px 16px; border-radius: 12px 0 0 12px;
+      cursor: pointer; z-index: 900;
+      display: none; /* hidden until paper has a glossary */
+      align-items: center; gap: 8px;
+      font-weight: 600; font-size: 14px; color: var(--text-primary);
+      box-shadow: -4px 4px 12px rgba(0,0,0,0.4);
+      transition: background 0.2s, right 0.3s, transform 0.2s;
+    }
+    .glossary-tab:hover {
+      background: #1f2937; color: var(--accent-hover);
+      transform: translateY(-50%) scale(1.02);
+    }
+    .glossary-tab.hidden { right: -150px; }
+
     .glossary-header {
-      font-size: 11px; font-weight: 700; color: #9ca3af;
-      text-transform: uppercase; letter-spacing: 1.5px;
-      margin-bottom: 12px; display: flex; align-items: center; gap: 6px;
+      font-weight: 700; color: #f3f4f6;
+      text-transform: uppercase; letter-spacing: 1px;
     }
     .glossary-card {
       background: #1f2937; border: 1px solid #374151;
@@ -190,7 +237,7 @@
       transition: all .3s;
     }
     .glossary-card[open]       { border-color: #4b5563; background: #1a2332; }
-    .glossary-card.highlighted { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,.3); transform: translateX(-4px); }
+    .glossary-card.highlighted { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,.4); transform: translateX(-4px); }
     .glossary-term {
       padding: 12px 14px; font-weight: 600; color: #f3f4f6;
       cursor: pointer; display: flex; justify-content: space-between;
@@ -204,6 +251,12 @@
       border-top: 1px solid transparent;
     }
     .glossary-card[open] .glossary-def { border-top: 1px solid #374151; padding-top: 10px; }
+
+    .close-btn {
+      background: none; border: none; color: #9ca3af; cursor: pointer; 
+      font-size: 24px; line-height: 1; padding: 0 4px; transition: color 0.2s;
+    }
+    .close-btn:hover { color: #f3f4f6; }
 
     /* SCORES */
     .scores-grid {
@@ -232,7 +285,7 @@
     .read-more-btn:hover { background: #fff; transform: translateY(-2px); }
 
     /* FEEDBACK */
-    .feedback-box { margin-top: 8px; }
+    .feedback-box { margin-top: 28px; }
     .feedback-box input,
     .feedback-box textarea {
       width: 100%; background: #1f2937; border: 1px solid #374151;
@@ -260,51 +313,60 @@
 <body>
 
   <div class="top-bar">
-    Desenvolvido por <a href="https://www.linkedin.com/in/felipe-bochini/" target="_blank" rel="noopener noreferrer">Felipe Bochini</a>
+    Developed by <a href="https://www.linkedin.com/in/felipe-bochini/" target="_blank" rel="noopener noreferrer">Felipe Bochini</a>
   </div>
 
   <header class="container header">
     <h1>Paper Rank</h1>
-    <p class="muted">Os melhores artigos de IA do arXiv, selecionados e classificados por Inteligência Artificial.</p>
+    <p class="muted">The best AI papers from arXiv, curated and ranked by Artificial Intelligence.</p>
   </header>
 
   <main class="container">
 
     <div class="page-layout" id="pageLayout">
       
-      <div class="main-content">
-        
+      <!-- MAIN CONTENT: Filters + Paper + Feedback -->
+      <!-- Filters Widget -->
+      <aside class="filters-panel">
         <div class="card controls-card">
           <div class="controls-grid">
+            <!-- Week Range Selector -->
             <div>
-              <label class="ctrl-label" for="weekSelect">Período de Extração</label>
+              <label class="ctrl-label" for="weekSelect">Extraction Period</label>
               <select id="weekSelect" disabled>
-                <option value="" disabled selected>Carregando...</option>
+                <option value="" disabled selected>Loading...</option>
               </select>
             </div>
 
+            <!-- Topic Selector -->
             <div>
-              <label class="ctrl-label" for="topicSelect">Tópico de Pesquisa</label>
+              <label class="ctrl-label" for="topicSelect">Research Topic</label>
               <select id="topicSelect" disabled>
-                <option value="" disabled selected>Selecione um tópico...</option>
+                <option value="" disabled selected>Select a topic...</option>
               </select>
             </div>
           </div>
         </div>
 
+      </aside>
+
+      <div class="main-content">
+
+        <!-- Paper Area -->
         <section id="paper"></section>
         
+        <!-- Feedback -->
         <section class="card feedback-box">
-          <h3 style="text-align:center;margin:0 0 8px">Compartilhe seu Feedback</h3>
-          <p class="muted" style="font-size:14px;margin-top:0;text-align:center">Ajude-nos a melhorar o Paper Rank.</p>
+          <h3 style="text-align:center;margin:0 0 8px">Share your Feedback</h3>
+          <p class="muted" style="font-size:14px;margin-top:0;text-align:center">Help us improve Paper Rank.</p>
           <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
-            <input type="email" id="feedbackEmail" placeholder="E-mail (opcional)">
-            <textarea id="feedbackMessage" rows="3" placeholder="O que você achou?..."></textarea>
+            <input type="email" id="feedbackEmail" placeholder="Email (optional)">
+            <textarea id="feedbackMessage" rows="3" placeholder="What do you think?..."></textarea>
             <button onclick="sendFeedback()" id="submitBtn"
               style="background:var(--accent);color:#fff;border:none;padding:14px 28px;border-radius:12px;
                      font-weight:600;font-size:15px;cursor:pointer;width:100%;max-width:200px;
                      margin:0 auto;font-family:inherit">
-              Enviar Feedback
+              Submit Feedback
             </button>
             <p id="formStatus" style="font-size:12px;margin-top:4px;display:none;text-align:center"></p>
           </div>
@@ -312,9 +374,17 @@
 
       </div>
 
-      <div class="sidebar-content" id="glossarySidebar"></div>
-
     </div>
+
+    <!-- ── FLOATING UI FOR GLOSSARY ── -->
+    <div id="sidebarBackdrop" class="sidebar-backdrop" onclick="toggleGlossary(false)"></div>
+    <div class="sidebar-content" id="glossarySidebar"></div>
+    <button id="glossaryTab" class="glossary-tab" onclick="toggleGlossary(true)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+      </svg>
+      Glossary
+    </button>
 
     <footer class="footer muted"><div id="footerMeta"></div></footer>
   </main>
@@ -325,7 +395,8 @@
       topic:      document.getElementById('topicSelect'),
       paper:      document.getElementById('paper'),
       sidebar:    document.getElementById('glossarySidebar'),
-      pageLayout: document.getElementById('pageLayout'),
+      backdrop:   document.getElementById('sidebarBackdrop'),
+      tab:        document.getElementById('glossaryTab')
     };
 
     let weeksList       = [];
@@ -333,58 +404,80 @@
 
     marked.setOptions({ breaks: true, gfm: true });
 
-    /* ── Formatação de Datas ── */
+    /* ── Date Formatting ── */
     function formatWeekLabel(rangeStr) {
-      // Ex: "2026-02-22_to_2026-03-01"
+      const opts = { month: 'short', day: '2-digit', year: 'numeric' };
+      
+      // Handles both old string formats ("2026-03-01") and new ("2026-02-22_to_2026-03-01")
       if (!rangeStr.includes('_to_')) {
-        // Fallback caso o script ainda encontre datas antigas ("2026-03-01")
-        const d = new Date(rangeStr + 'T12:00:00');
-        return d.toLocaleDateString('pt-BR', {day:'2-digit', month:'short', year:'numeric'}).replace('.','');
+        const end = new Date(rangeStr + 'T12:00:00');
+        const start = new Date(end.getTime() - 6 * 24 * 60 * 60 * 1000);
+        return `${start.toLocaleDateString('en-US', opts)} — ${end.toLocaleDateString('en-US', opts)}`;
       }
 
       const [startStr, endStr] = rangeStr.split('_to_');
       const start = new Date(startStr + 'T12:00:00');
       const end   = new Date(endStr + 'T12:00:00');
       
-      const fmt = d => d.toLocaleDateString('pt-BR', {day:'2-digit', month:'short', year:'numeric'}).replace('.','');
-      return `${fmt(start)} – ${fmt(end)}`;
+      return `${start.toLocaleDateString('en-US', opts)} — ${end.toLocaleDateString('en-US', opts)}`;
     }
 
-    /* ── Layout ── */
-    function setSidebarVisible(yes) {
-      els.sidebar.style.display = yes ? 'block' : 'none';
+    /* ── Drawer UI ── */
+    function toggleGlossary(show) {
+      if (show) {
+        els.sidebar.classList.add('open');
+        els.backdrop.classList.add('open');
+        els.tab.classList.add('hidden');
+      } else {
+        els.sidebar.classList.remove('open');
+        els.backdrop.classList.remove('open');
+        els.tab.classList.remove('hidden');
+      }
     }
-    function clearSidebar() { els.sidebar.innerHTML = ''; setSidebarVisible(false); }
+
+    function setSidebarVisible(hasGlossary) {
+      if (hasGlossary) {
+        els.tab.style.display = 'flex';
+        els.tab.classList.remove('hidden');
+      } else {
+        els.tab.style.display = 'none';
+        toggleGlossary(false);
+      }
+    }
 
     /* ── States ── */
-    function showLoader(msg='Carregando...') {
-      clearSidebar();
+    function showLoader(msg='Loading...') {
+      setSidebarVisible(false);
       els.paper.innerHTML = `<div class="card"><div class="state-card"><div>${msg}</div></div></div>`;
     }
     function showError(msg) {
-      clearSidebar();
+      setSidebarVisible(false);
       els.paper.innerHTML = `<div class="card"><div class="state-card" style="color:#ef4444">
-        <div style="font-weight:600">Não foi possível exibir o ranking</div>
+        <div style="font-weight:600">Could not display the ranking</div>
         <div style="font-size:14px;color:var(--text-secondary);margin-top:4px">${msg}</div>
       </div></div>`;
     }
     function renderWelcome() {
-      clearSidebar();
+      setSidebarVisible(false);
       els.paper.innerHTML = `<div class="card"><div class="state-card">
         <div style="font-size:40px">✨</div>
-        <h2 style="margin:0;font-size:22px">Explore as Pesquisas de IA</h2>
-        <p class="muted" style="margin:0;max-width:380px;font-size:15px">Selecione uma semana e um tópico acima para mergulhar nos artigos mais inovadores.</p>
+        <h2 style="margin:0;font-size:22px">Explore AI Research</h2>
+        <p class="muted" style="margin:0;max-width:380px;font-size:15px">Select a week and a topic above to dive into the most innovative papers.</p>
       </div></div>`;
     }
 
     /* ── Glossary highlight ── */
     window.highlightGlossary = function(id) {
-      const card = document.getElementById(id);
-      if (!card) return;
-      card.open = true;
-      card.scrollIntoView({ behavior:'smooth', block:'center' });
-      card.classList.add('highlighted');
-      setTimeout(() => card.classList.remove('highlighted'), 2000);
+      toggleGlossary(true);
+      // Timeout to allow the sidebar to slide out before scrolling to the card
+      setTimeout(() => {
+        const card = document.getElementById(id);
+        if (!card) return;
+        card.open = true;
+        card.scrollIntoView({ behavior:'smooth', block:'center' });
+        card.classList.add('highlighted');
+        setTimeout(() => card.classList.remove('highlighted'), 2000);
+      }, 300);
     };
 
     /* ── Render paper ── */
@@ -395,9 +488,9 @@
 
       const topic = (currentWeekData.topics || {})[topicKey];
       if (!topic?.paper) {
-        clearSidebar();
+        setSidebarVisible(false);
         els.paper.innerHTML = `<div class="card"><div class="state-card">
-          <div style="font-size:40px">📭</div><div style="font-weight:500">Nenhum artigo encontrado</div>
+          <div style="font-size:40px">📭</div><div style="font-weight:500">No papers found</div>
         </div></div>`;
         return;
       }
@@ -406,16 +499,24 @@
       const authors = Array.isArray(p.authors) ? p.authors : [];
       const scores  = p.scores || {};
 
-      let summaryHtml = p.summary ? marked.parse(p.summary) : "<span class='muted'>(Sumário vazio)</span>";
+      let summaryHtml = p.summary ? marked.parse(p.summary) : "<span class='muted'>(Empty summary)</span>";
 
       const hasGlossary = p.glossary && Object.keys(p.glossary).length > 0;
       let glossaryHtml  = '';
 
       if (hasGlossary) {
-        glossaryHtml = `<div class="glossary-header">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-          </svg>Glossário</div>`;
+        glossaryHtml = `
+          <div class="sidebar-inner">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
+              <div class="glossary-header" style="margin:0; font-size:14px; display:flex; align-items:center; gap:8px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+                </svg> Glossary
+              </div>
+              <button class="close-btn" onclick="toggleGlossary(false)">&times;</button>
+            </div>
+            <div class="glossary-cards">
+        `;
 
         Object.keys(p.glossary).sort((a,b) => b.length - a.length).forEach(term => {
           const id = 'gl-' + encodeURIComponent(term).replace(/%/g,'');
@@ -427,8 +528,10 @@
           </details>`;
           const esc   = term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
           const regex = new RegExp(`(?<!<[^>]*)\\b(${esc})\\b(?![^<]*>)`, 'gi');
-          summaryHtml = summaryHtml.replace(regex, `<span class="glossary-link" onclick="highlightGlossary('${id}')" title="Ver definição">$1</span>`);
+          summaryHtml = summaryHtml.replace(regex, `<span class="glossary-link" onclick="highlightGlossary('${id}')" title="View definition">$1</span>`);
         });
+
+        glossaryHtml += `</div></div>`;
       }
 
       els.sidebar.innerHTML = glossaryHtml;
@@ -436,7 +539,7 @@
 
       els.paper.innerHTML = `
         <div class="paper-header">
-          ${p.published ? `<div class="paper-meta"><span class="badge">📝 Publicado em: ${p.published}</span></div>` : ''}
+          ${p.published ? `<div class="paper-meta"><span class="badge">📝 Published on: ${p.published}</span></div>` : ''}
           <h2 class="paper-title"><a href="${p.arxiv_url}" target="_blank" rel="noopener noreferrer">${p.title}</a></h2>
         </div>
         <div class="card">
@@ -444,18 +547,18 @@
           ${scores.weighted ? `
           <div class="scores-grid">
             <div class="score-item"><span class="score-value">${scores.weighted.toFixed(1)}</span><span class="score-label">Global Rank</span></div>
-            <div class="score-item"><span class="score-value">${scores.innovation  ? scores.innovation.toFixed(1)  : '-'}</span><span class="score-label">Inovação</span></div>
-            <div class="score-item"><span class="score-value">${scores.impact      ? scores.impact.toFixed(1)      : '-'}</span><span class="score-label">Impacto</span></div>
-            <div class="score-item"><span class="score-value">${scores.methodology ? scores.methodology.toFixed(1) : '-'}</span><span class="score-label">Metodologia</span></div>
+            <div class="score-item"><span class="score-value">${scores.innovation  ? scores.innovation.toFixed(1)  : '-'}</span><span class="score-label">Innovation</span></div>
+            <div class="score-item"><span class="score-value">${scores.impact      ? scores.impact.toFixed(1)      : '-'}</span><span class="score-label">Impact</span></div>
+            <div class="score-item"><span class="score-value">${scores.methodology ? scores.methodology.toFixed(1) : '-'}</span><span class="score-label">Methodology</span></div>
             <div class="score-item"><span class="score-value">${scores.topic_fit   ? scores.topic_fit.toFixed(1)   : '-'}</span><span class="score-label">Topic Fit</span></div>
           </div>` : ''}
           <div class="authors">
-            <strong>Autores:</strong> ${authors.join(', ') || 'Desconhecido'}
-            <div style="margin-top:20px"><a href="${p.arxiv_url}" class="read-more-btn" target="_blank" rel="noopener noreferrer">Ler Artigo Completo no arXiv</a></div>
+            <strong>Authors:</strong> ${authors.join(', ') || 'Unknown'}
+            <div style="margin-top:20px"><a href="${p.arxiv_url}" class="read-more-btn" target="_blank" rel="noopener noreferrer">Read Full Paper on arXiv</a></div>
           </div>
         </div>`;
 
-      renderMathInElement(els.pageLayout, {
+      renderMathInElement(document.getElementById('pageLayout'), {
         delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false}],
         throwOnError: false
       });
@@ -470,14 +573,14 @@
 
     async function loadWeekData(weekDate, targetTopic) {
       try {
-        showLoader('Buscando classificação...');
+        showLoader('Fetching ranking...');
         els.topic.disabled = true;
         currentWeekData = await fetchJson(`weeks/${weekDate}.json`);
 
         const topicsObj  = currentWeekData.topics || {};
         const topicItems = Object.keys(topicsObj).map(k => ({ value:k, label: topicsObj[k]?.topic_name || k }));
 
-        els.topic.innerHTML = '<option value="" disabled selected>Selecione um tópico...</option>';
+        els.topic.innerHTML = '<option value="" disabled selected>Select a topic...</option>';
         topicItems.forEach(it => {
           const opt = document.createElement('option');
           opt.value = it.value; opt.textContent = it.label;
@@ -497,7 +600,7 @@
         else u.searchParams.delete('topic');
         history.replaceState(null, '', u.toString());
 
-      } catch { showError('O resumo da pesquisa está temporariamente indisponível.'); }
+      } catch { showError('The research digest is temporarily unavailable.'); }
     }
 
     /* ── Feedback ── */
@@ -506,34 +609,37 @@
       const msg    = document.getElementById('feedbackMessage').value;
       const btn    = document.getElementById('submitBtn');
       const status = document.getElementById('formStatus');
-      if (!msg.trim()) { alert('Por favor, insira uma mensagem.'); return; }
-      btn.disabled = true; btn.innerText = 'Enviando...';
-      status.style.display = 'block'; status.innerText = 'Processando...';
+      
+      if (!msg.trim()) { alert('Please enter a message.'); return; }
+      
+      btn.disabled = true; btn.innerText = 'Sending...';
+      status.style.display = 'block'; status.innerText = 'Processing...';
+      
       try {
         const res = await fetch('https://formspree.io/f/mkovedzd', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ email, message:msg, topic:els.topic.value, week:els.week.value })
         });
         if (res.ok) {
-          status.innerText = '✓ Obrigado! Feedback enviado.'; status.style.color = '#10b981';
+          status.innerText = '✓ Thank you! Feedback sent.'; status.style.color = '#10b981';
           document.getElementById('feedbackMessage').value = '';
           document.getElementById('feedbackEmail').value   = '';
-          btn.innerText = 'Enviado!';
+          btn.innerText = 'Sent!';
         } else throw new Error();
       } catch {
-        status.innerText = '✗ Falha ao enviar.'; status.style.color = '#ef4444';
-        btn.disabled = false; btn.innerText = 'Tentar Novamente';
+        status.innerText = '✗ Failed to send.'; status.style.color = '#ef4444';
+        btn.disabled = false; btn.innerText = 'Try Again';
       }
     }
 
     /* ── Bootstrap ── */
     async function main() {
       try {
-        showLoader('Sincronizando...');
+        showLoader('Syncing...');
         weeksList = await fetchJson('weeks.json');
-        if (!weeksList || !weeksList.length) { showError('Nenhum dado encontrado.'); return; }
+        if (!weeksList || !weeksList.length) { showError('No data found.'); return; }
 
-        // Popula o seletor de semanas
+        // Populate weeks selector
         els.week.innerHTML = '';
         weeksList.forEach(w => {
           const opt = document.createElement('option');
@@ -546,7 +652,7 @@
         const u         = new URL(window.location.href);
         const paramWeek = u.searchParams.get('week');
         
-        // Verifica se a semana da URL existe na lista, se não pega a última extraída
+        // Checks if URL week exists, otherwise defaults to the latest
         const selectedWeek = (paramWeek && weeksList.includes(paramWeek)) ? paramWeek : weeksList[0];
         els.week.value = selectedWeek;
 
@@ -565,7 +671,7 @@
           renderPaper();
         };
 
-      } catch { showError('Falha ao conectar ao serviço Paper Rank.'); }
+      } catch { showError('Failed to connect to Paper Rank service.'); }
     }
 
     main();
