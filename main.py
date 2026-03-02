@@ -55,11 +55,10 @@ TOPIC_QUERIES = {
     },
     "computer_vision": {
         "name": "Computer Vision",
-        "description": "Research focusing purely on visual recognition, image segmentation, and object detection (excluding multimodal text-to-image).",
+        "description": "Research focusing purely on visual recognition, image segmentation, and object detection.",
         "query": '''((ti:vision OR ti:image OR ti:detection OR ti:segmentation OR 
                       ti:"object detection" OR abs:"convolutional" OR abs:"visual recognition")
-                     AND NOT (ti:language OR ti:multimodal OR ti:"vision-language" OR 
-                              abs:"vision-language" OR abs:"cross-modal"))''',
+                     AND NOT (ti:language OR ti:multimodal OR ti:"vision-language"))''',
         "max_papers": 300
     },
     "multimodal": {
@@ -123,8 +122,8 @@ PHASE1_TEMPERATURE = 0.0
 PHASE2_MAX_TOKENS = 4500
 PHASE2_TEMPERATURE = 0.5 
 
-PHASE3_MAX_TOKENS = 900
-PHASE3_TEMPERATURE = 0.5
+PHASE3_MAX_TOKENS = 3250
+PHASE3_TEMPERATURE = 0.3
 PHASE3_TOP_P = 0.9
 
 # Regex helpers
@@ -143,6 +142,10 @@ class PaperEvaluation(BaseModel):
     impact: float = Field(ge=0.0, le=10.0, description="Score for performance improvements and real-world potential.")
     methodology: float = Field(ge=0.0, le=10.0, description="Score for reproducibility and solid approach.")
     topic_fit: float = Field(ge=0.0, le=10.0, description="Score for how well the paper fits the specific topic category.")
+
+class SummaryGlossaryOutput(BaseModel):
+    summary: str = Field(description="The markdown summary of the paper.")
+    glossary: Dict[str, str] = Field(description="A dictionary of complex terms (e.g. 'MARL') and their detailed explanations.")
 
 
 # -------------------------
@@ -170,8 +173,9 @@ class Paper:
     weighted_score: float = 0.0
     detailed_reasoning: str = ""
     
-    # Phase 3: Summary
+    # Phase 3: Summary & Glossary
     final_summary: str = ""
+    glossary: Optional[Dict[str, str]] = None
 
 
 # -------------------------
@@ -322,8 +326,8 @@ PAPERS TO EVALUATE:
 JSON array:""".strip()
 
 
-def build_summary_prompt(full_text: str, title: str) -> str:
-    """Phase 3: Generate accessible summary from full HTML."""
+def build_summary_with_glossary_prompt(full_text: str, title: str) -> str:
+    """Phase 3: Generate accessible summary and extract a technical glossary."""
     return f"""You are an expert technical writer creating research summaries for a diverse AI/ML audience. Your summaries appear in a weekly digest read by practitioners ranging from early-career data scientists to technical managers.
 
 <audience>
@@ -348,7 +352,10 @@ Your summary should naturally incorporate:
 - What makes this work significant (lead with this if compelling)
 - The core technical approach - explain key innovations clearly
 - Concrete results: metrics, scale, comparisons, or theoretical guarantees
-- Practical relevance: why this matters for building systems, choosing methods, or understanding the field
+- Practical relevance: only include this if the work has genuine, near-term applicability for 
+  practitioners building real systems or making technology decisions. If the paper is primarily 
+  theoretical, a foundational benchmark, or an academic stepping stone, end on the results or 
+  broader significance instead — do not force a "for practitioners" closing paragraph.
 
 The order and emphasis should fit the paper - don't force a formula.
 </content_requirements>
@@ -356,39 +363,34 @@ The order and emphasis should fit the paper - don't force a formula.
 <style_guidance>
 - Professional and precise, but not overly academic
 - More akin to a technical blog (Distill, The Gradient) than a research abstract
-- When using specialized terms, provide brief context (e.g., "KL divergence, a measure of distribution difference")
 - Avoid overused phrases: "game-changer," "revolutionary," "unlock," "leverage"
-- Avoid formulaic transitions: "The authors demonstrate," "Results show that"
 - Use active voice and varied sentence structure
-- Be measured about claims - don't amplify hype, but acknowledge genuine advances
-- Use markdown formatting naturally: **bold** for genuinely critical terms or standout numbers, 
-  *italics* for emphasis. Do not use headings, bullet points, or lists — prose only.
+- Use markdown formatting naturally: **bold** for genuinely critical terms or standout numbers, *italics* for emphasis.
 </style_guidance>
 
-<constraints>
-- Length: 220-260 words
-- Format: 3-4 paragraphs with natural flow
-- No headings, bullet points, or numbered lists
-- Vary opening hooks - avoid repetitive patterns
-</constraints>
+<output_format>
+You MUST return ONLY a valid JSON object. Do not wrap it in markdown code blocks if possible.
+The JSON must contain two keys:
+1. "summary": A 220-260 word markdown summary (3-4 paragraphs) following the style guidance above.
+2. "glossary": Identify 3-6 complex acronyms or technical concepts used in your summary. Provide a clear, detailed 2-sentence explanation for each.
+   CRITICAL: The keys in this dictionary MUST be exact, case-sensitive substrings of the text in your summary.
 
-<reference_example>
-Here's an example of the tone and depth to aim for:
-
-"It's startling how a single, cleverly crafted sentence can hijack an entire AI assistant, turning a helpful planner loop into a conduit for unsafe tool calls. That hidden attack surface has been a blind spot ever since developers started stitching together LLM prompts, code execution, and external APIs into autonomous agents.
-
-The authors answer this gap with the LLMbda calculus, an untyped call-by-value lambda calculus—essentially a minimal programming language that evaluates expressions by substituting values—augmented by dynamic information-flow control, which tracks how data moves through the system to enforce security policies..."
-
-Note: Technical terms are used but explained inline. Sophisticated but accessible.
-</reference_example>
+Format:
+{{
+  "summary": "Your markdown formatted summary here...",
+  "glossary": {{
+    "TERM 1": "Detailed 2-sentence explanation of term 1.",
+    "TERM 2": "Detailed 2-sentence explanation of term 2."
+  }}
+}}
+</output_format>
 
 Title: {title}
 
 Full paper content:
 {full_text}
 
-Write the summary now:""".strip()
-
+JSON Output:""".strip()
 
 
 # -------------------------
@@ -486,7 +488,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
     scored_by_topic = {}
     
     BATCH_SIZE = 5
-    QUALIFIER_TOP_K = 5
+    QUALIFIER_TOP_K = 10
     
     for topic_key, topic_papers in papers_by_topic.items():
         topic_name = TOPIC_QUERIES[topic_key]["name"]
@@ -578,7 +580,7 @@ def score_papers_detailed(papers_by_topic: Dict[str, List[Paper]], top_k: int = 
 # -------------------------
 
 def generate_summaries_for_winners(papers_by_topic: Dict[str, List[Paper]], model_id: str = MODEL_ID) -> Dict[str, Paper]:
-    print(f"\nGenerating summaries (1 per topic)...")
+    print(f"\nGenerating summaries & glossaries (1 per topic)...")
     bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
     winners = {}
     
@@ -592,12 +594,33 @@ def generate_summaries_for_winners(papers_by_topic: Dict[str, List[Paper]], mode
             html_content = download_and_extract_html(best_paper)
             if not html_content: html_content = best_paper.abstract
             
-            prompt = build_summary_prompt(html_content, best_paper.title)
-            summary = invoke_bedrock(bedrock, model_id, prompt, max_tokens=PHASE3_MAX_TOKENS, temperature=PHASE3_TEMPERATURE, top_p=PHASE3_TOP_P)
-            best_paper.final_summary = summary
+            prompt = build_summary_with_glossary_prompt(html_content, best_paper.title)
+            response_text = invoke_bedrock(bedrock, model_id, prompt, max_tokens=PHASE3_MAX_TOKENS, temperature=PHASE3_TEMPERATURE, top_p=PHASE3_TOP_P)
+            
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            
+            # FIX 3: Robust fallback logic. 
+            if json_match:
+                try:
+                    parsed = SummaryGlossaryOutput.model_validate_json(json_match.group(0))
+                    best_paper.final_summary = parsed.summary
+                    best_paper.glossary = parsed.glossary
+                except ValidationError as ve:
+                    print(f"  JSON Validation failed: {ve}")
+                    # If JSON parsing fails (e.g. truncated), safely fallback to paper abstract
+                    best_paper.final_summary = best_paper.abstract
+                    best_paper.glossary = {}
+            else:
+                # If no JSON was matched at all, ensure we don't return an empty string
+                best_paper.final_summary = response_text if response_text.strip() else best_paper.abstract
+                best_paper.glossary = {}
+                
             winners[topic_key] = best_paper
+            
         except Exception as e:
-            best_paper.final_summary = ""
+            print(f"  Error generating summary for {best_paper.title}: {e}")
+            best_paper.final_summary = best_paper.abstract
+            best_paper.glossary = {}
             winners[topic_key] = best_paper
     
     return winners
@@ -642,9 +665,9 @@ def update_weeks_index(week_date: str, bucket: str, out_dir: Path):
     if bucket: upload_to_s3(weeks_file, bucket, prefix="") # Root upload
 
 
-def create_weekly_output(winners: Dict[str, Paper], week_date: str) -> dict:
+def create_weekly_output(winners: Dict[str, Paper], week_range: str) -> dict:
     output = {
-        "week_date": week_date,
+        "week_date": week_range, # Mantém a chave para compatibilidade, mas agora guarda o range
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "model": MODEL_ID,
         "topics": {}
@@ -659,6 +682,7 @@ def create_weekly_output(winners: Dict[str, Paper], week_date: str) -> dict:
                 "arxiv_url": f"https://arxiv.org/abs/{paper.arxiv_id}",
                 "arxiv_id": paper.arxiv_id,
                 "summary": paper.final_summary,
+                "glossary": paper.glossary,
                 "scores": {
                     "innovation": paper.innovation,
                     "impact": paper.impact,
@@ -670,7 +694,6 @@ def create_weekly_output(winners: Dict[str, Paper], week_date: str) -> dict:
         }
     return output
 
-
 # -------------------------
 # Main
 # -------------------------
@@ -680,20 +703,25 @@ def main():
     print("AI Research Digest - Tournament Edition")
     print("="*60)
     
-    week_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # NOVA LÓGICA DE DATAS: Gerando o range da semana
+    end_dt = datetime.now(timezone.utc)
+    start_dt = end_dt - timedelta(days=DAYS_LOOKBACK)
+    week_range = f"{start_dt.strftime('%Y-%m-%d')}_to_{end_dt.strftime('%Y-%m-%d')}"
+    
     papers_by_topic = fetch_all_papers_by_topic()
     scored_papers = score_papers_detailed(papers_by_topic)
     winners = generate_summaries_for_winners(scored_papers)
-    output = create_weekly_output(winners, week_date)
+    output = create_weekly_output(winners, week_range)
     
-    out_file = OUT_DIR / f"{week_date}.json"
+    # Salva usando o formato de range: ex "2026-02-22_to_2026-03-01.json"
+    out_file = OUT_DIR / f"{week_range}.json"
     with open(out_file, 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
         
     if OUTPUT_BUCKET:
         upload_to_s3(out_file, OUTPUT_BUCKET, OUTPUT_PREFIX)
     
-    update_weeks_index(week_date, OUTPUT_BUCKET, OUT_DIR)
+    update_weeks_index(week_range, OUTPUT_BUCKET, OUT_DIR)
 
     print("\n" + "="*60)
     print("PIPELINE COMPLETE!")
