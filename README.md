@@ -1,6 +1,6 @@
-﻿# PaperScope
+﻿# Paper Rank
 
-PaperScope is an automated pipeline and static web application that curates, evaluates, and summarizes the top AI research papers from arXiv on a weekly basis. It uses Large Language Models to rank papers across predefined research topics and publishes the results as a lightweight, serverless web digest.
+Paper Rank is an automated pipeline and static web application that curates, evaluates, and summarizes the top AI research papers from arXiv on a weekly basis. It uses Large Language Models to rank papers across predefined research topics and publishes the results as a lightweight, serverless web digest.
 
 ---
 
@@ -64,8 +64,8 @@ Topics and their search queries are configured in the `TOPIC_QUERIES` dictionary
 ### Local
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/PaperScope.git
-cd PaperScope
+git clone https://github.com/YOUR-USERNAME/Paper Rank.git
+cd Paper Rank
 pip install -r requirements.txt
 ```
 
@@ -91,7 +91,7 @@ OUTPUT_PREFIX=weeks
 - Add a startup cron job:
 
 ```
-@reboot sleep 60 && cd /home/ec2-user/PaperScope && python3 main.py > pipeline.log 2>&1
+@reboot sleep 60 && cd /home/ec2-user/Paper Rank && python3 main.py > pipeline.log 2>&1
 ```
 
 **EventBridge**
